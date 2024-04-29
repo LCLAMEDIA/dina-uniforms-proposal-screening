@@ -54,6 +54,16 @@ class NotionOperator:
                 "children": children,
             },
         }
+    def create_image_block(self, image_url):
+        return {
+            "object": "block",
+            "type": "image",
+            "image": {
+                "external":  {
+                    "url": image_url
+                }
+            }
+        }
 
     def create_paragraph_block(self, content, link=None, code=False):
         text_config = {"content": content}
@@ -191,6 +201,7 @@ class NotionOperator:
         properties = id | {"Date": {"type": "date", "date": {"start": "2023-10-10"}}}
         children = [
             self.create_heading_block("Test Heading 1"),
+            self.create_image_block("https://cdn.discordapp.com/attachments/1217668035742011502/1234274572069765211/Dina_Corporate_logo_inline_RGB.jpg"),
             self.create_toggle_block(
                 "Test Toggle", [self.create_paragraph_block("Test Paragraph")]
             ),

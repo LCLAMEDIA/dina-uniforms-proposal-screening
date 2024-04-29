@@ -53,7 +53,6 @@ class PromptsOperations:
             "description": "Analysis specific to proposal eligibility - Aspects needing consideration before pursuing",
             "prompt": """
         Analyse the following extract for a tender proposal. You are looking specifically at things relating to eligibility for applying for this tender. Identify potential risks and aspects of this tender that relate to eligibility for application and summarise them for me. 
-        Try to generate at least 4 dot points for the following output json response
         Your Output should be a valid JSON response of format:
         {
             "analysis": "Your Full Analysis",
@@ -87,7 +86,7 @@ class PromptsOperations:
             "name": "combine_dot_point_prompt",
             "prompt": """
         You will be provided a list of dot points and their analysis from an earlier analysis of a tender proposal. These were generated using different chunks of the same proposal, so some of them may have overlapping information/say the same thing.
-        I want you to group together the dot points that are more or less the same or similar but otherwise leave the rest as is. I don't want more than 10 dot points if possible, but if there are more than 10 important ones its fine to leave it in.
+        I want you to group together the dot points that are more or less the same or similar but otherwise leave the rest as is. I don't want more than 6 dot points - make it succinct.
         If a dot point includes a specific proposal requirement, make sure to leave that in so we can see what theyre referring to.
         Your response should be a valid json of the following format
         {
@@ -104,7 +103,7 @@ class PromptsOperations:
             "name": "combine_analysis_prompt",
             "prompt": """
         You will be provided a list of analysis' from an earlier analysis of a tender proposal. These were generated using different chunks of the same proposal, so some of them may have overlapping information/say the same thing.
-        I want you to form a cohesive analysis utilising these, making sure that we're not duplicating information. Specify important aspects of the proposal to be aware of. Keep it succinct and to 2 to 3 sentences.
+        I want you to form a cohesive analysis utilising these, making sure that we're not duplicating information. Specify important aspects of the proposal to be aware of. Keep it succinct and to 2-3 sentences.
         Your response should be a valid json of the following format
         {
             "analysis": "Your combined analysis"
@@ -117,8 +116,8 @@ class PromptsOperations:
                 "name": "combine_cost_value_prompt",
                 "prompt": """
             You will be provided a list of cost value items generated from a tender proposal. These were generated using different chunks of the same proposal that may have overlapping items.
-            I want you to combine any overlapping items to form the one list of cost value items so we don't have any duplicates.
-            Keep it to a maximum of 10 items, prioritise dollar values and numerical figures.
+            I want you to combine any overlapping items to form the one list of cost value items so we don't have any duplicates. Only include items that have a direct cost/figures.
+            Keep it to a maximum of 7 items, prioritise dollar values and numerical figures.
             Your reponse should be a valid json of the following format
             {
                 "cost_value": [
