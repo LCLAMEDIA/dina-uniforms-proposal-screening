@@ -99,16 +99,21 @@ class ProposalScreeningOperations:
         return content
 
     def download_file(self, document_url: str, output_path: str):
-        # Download Proposal
-        # if "docs.google.com" in self.proposal_url:
-        #     file_location = self.google_docs_ops.download_from_drive(
-        #         self.proposal_url, download_folder
-        #     )
-        # else:
-        #     file_location = self.download_file_from_url(
-        #         self.proposal_url, download_folder
-        #     )pass
-        pass
+        import requests
+        
+        # Send a GET request to the URL
+        response = requests.get(document_url)
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Open the file in binary write mode and write the content
+            with open(output_path, 'wb') as file:
+                file.write(response.content)
+        else:
+            # Handle possible errors
+            response.raise_for_status()
+        
+        return output_path
 
 
     def analyse_single_prompt(self, chunk: str, prompt_function) -> Analysis:
@@ -248,13 +253,14 @@ class ProposalScreeningOperations:
         return all_analysis
 
     
-    def run(self):
+    def run(self, proposal_url):
         download_folder = "_tmp"
         os.makedirs(download_folder, exist_ok=True)
         proposal_name = "Coles Proposal"
         
-        file_location = self.download_file('','')
-        file_location = '_tmp/coles_proposal.docx'
+        file_location = self.download_file(proposal_url,'proposal.docx')
+        
+        #file_location = '_tmp/coles_proposal.docx'
         
         # Extract text from proposal
         text = self.extract_text(file_location)

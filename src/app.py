@@ -41,7 +41,7 @@ def analyse_proposal():
         notion_ops=notion_ops
     )
     
-    proposal_ops.run()
+    proposal_ops.run(proposal_url=inputs.get('url'))
     
     return {}, 200
 
