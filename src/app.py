@@ -1,6 +1,7 @@
 from flask import Flask, request
 import logging
 import os
+import threading
 
 from GoogleDocsOperations import GoogleDocsOperations
 from NotionOperator import NotionOperator
@@ -20,30 +21,38 @@ def create_report_document():
     notion_ops = NotionOperator()
     notion_ops.create_test_page()
     return {}, 200
-    pass
 
+
+def run_analysis(url: str, page_id: str):
+    prompts_ops = PromptsOperations()
+    gpt_ops = GPTOperations(prompts_ops=prompts_ops)
+    notion_ops = NotionOperator()
+    
+    proposal_ops = ProposalScreeningOperations(
+        proposal_url=url,
+        google_docs_ops=None,
+        voiceflow_ops=None,
+        prompts_ops=prompts_ops,
+        gpt_ops=gpt_ops,
+        notion_ops=notion_ops,
+        page_id=page_id
+    )
+    
+    proposal_ops.run()
 
 @app.route("/analyse_proposal", methods=["POST"])
 def analyse_proposal():
     inputs = request.json
     
-    #google_docs_ops = GoogleDocsOperations()
-    voiceflow_ops = VoiceflowOperations()
-    prompts_ops = PromptsOperations()
-    gpt_ops = GPTOperations(prompts_ops=prompts_ops)
     notion_ops = NotionOperator()
-    proposal_ops = ProposalScreeningOperations(
-        inputs.get("proposal_url"),
-        google_docs_ops=None,
-        voiceflow_ops=voiceflow_ops,
-        prompts_ops=prompts_ops,
-        gpt_ops=gpt_ops,
-        notion_ops=notion_ops
-    )
+    page_id, page_url = notion_ops.create_blank_page(inputs.get("title"))
     
-    proposal_ops.run(proposal_url=inputs.get('url'))
+    # Start the background task
+    thread = threading.Thread(target=run_analysis, args=(inputs.get('url'), page_id))
+    thread.start()
     
-    return {}, 200
+    return {'url': page_url}, 200
+    
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

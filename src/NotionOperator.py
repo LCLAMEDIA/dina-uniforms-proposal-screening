@@ -2,7 +2,7 @@ from notion_client import Client
 import os, sys
 from datetime import date, datetime
 import json
-
+import logging
 from Analysis import Analysis
 
 
@@ -15,6 +15,22 @@ class NotionOperator:
         self.client = Client(auth=api_key)
         self.database_id = database_id
 
+    
+    def create_blank_page(self, title):
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        id = {
+            "Title": {"title": [{"text": {"content": f"[{title}] Proposal Analysis"}}]}
+        }
+        properties = id | {"Date": {"type": "date", "date": {"start": current_date}}}
+        res = self.client.pages.create(
+            parent={"database_id": self.database_id},
+            properties=properties
+        )
+        page_id = res.get('id')
+        page_url = res.get('url')
+        logging.info(f"Created Report page with ID = {page_id}")
+        return page_id, page_url
+        
     def create_heading_block(self, title, heading_style="heading_2"):
         return {
             "object": "block",
@@ -157,14 +173,9 @@ class NotionOperator:
         return [prompt_section, description] + cost_value_items
 
     def create_page_from_analysis(
-        self, proposal_name: str, analysis_list: list[Analysis]
+        self, proposal_name: str, analysis_list: list[Analysis], page_id: str
     ):
         current_date = datetime.now().strftime("%Y-%m-%d")
-
-        id = {
-            "Title": {"title": [{"text": {"content": f"[{proposal_name}] Analysis"}}]}
-        }
-        properties = id | {"Date": {"type": "date", "date": {"start": current_date}}}
 
         # Create a toggle block for each analysis
         analysis_blocks = []
@@ -190,11 +201,7 @@ class NotionOperator:
             self.create_heading_block(f"[{proposal_name}] Analysis - {current_date}")
         ]
         children += analysis_blocks
-        self.client.pages.create(
-            parent={"database_id": self.database_id},
-            properties=properties,
-            children=children,
-        )
+        self.client.blocks.children.append(block_id=page_id, children=children)
 
     def create_test_page(self):
         id = {"Title": {"title": [{"text": {"content": "Test"}}]}}

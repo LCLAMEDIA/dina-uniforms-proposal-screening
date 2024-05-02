@@ -56,7 +56,8 @@ class ProposalScreeningOperations:
         voiceflow_ops: VoiceflowOperations,
         prompts_ops: PromptsOperations,
         gpt_ops: GPTOperations,
-        notion_ops: NotionOperator
+        notion_ops: NotionOperator,
+        page_id: str
     ):
         self.proposal_url = proposal_url
         self.google_docs_ops = google_docs_ops
@@ -64,6 +65,7 @@ class ProposalScreeningOperations:
         self.prompt_ops = prompts_ops
         self.gpt_ops = gpt_ops
         self.notion_ops = notion_ops
+        self.page_id = page_id
 
     def split_into_chunks(
         self, text, chunk_size: int = 8000, overlap_percentage: float = 0.1
@@ -254,9 +256,9 @@ class ProposalScreeningOperations:
         return all_analysis
 
     
-    def run(self, proposal_url):
+    def run(self):
         proposal_name = "Proposal"
-        file_location = self.download_file(proposal_url,'proposal.docx')
+        file_location = self.download_file(self.proposal_url,'proposal.docx')
         logging.info(f"File Exists: {os.path.exists(file_location)}")
         #file_location = '_tmp/coles_proposal.docx'
         
@@ -275,7 +277,7 @@ class ProposalScreeningOperations:
             print(analysis)
         
         
-        self.notion_ops.create_page_from_analysis(proposal_name=proposal_name, analysis_list=combined_analysis_list)
+        self.notion_ops.create_page_from_analysis(proposal_name=proposal_name, analysis_list=combined_analysis_list, page_id=self.page_id)
         # Create Report
             
         # Analysis_list = [
