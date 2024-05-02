@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.INFO)
 class DocumentContentExtractor:
     def __init__(self, document_path):
         self.doc = Document(document_path)
+        logging.info(self.doc.element.body)
 
     def extract_content(self):
         content_parts = []
@@ -254,12 +255,9 @@ class ProposalScreeningOperations:
 
     
     def run(self, proposal_url):
-        download_folder = "_tmp"
-        os.makedirs(download_folder, exist_ok=True)
-        proposal_name = "Coles Proposal"
-        
+        proposal_name = "Proposal"
         file_location = self.download_file(proposal_url,'proposal.docx')
-        
+        logging.info(f"File Exists: {os.path.exists(file_location)}")
         #file_location = '_tmp/coles_proposal.docx'
         
         # Extract text from proposal

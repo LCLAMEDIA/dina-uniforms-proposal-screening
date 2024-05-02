@@ -1,4 +1,4 @@
-FROM python:3.11
+FROM python:3.12
 
 # Install FFmpeg
 RUN apt-get update
@@ -12,9 +12,6 @@ WORKDIR /app
 
 # Install required Python packages
 RUN pip install -r src/requirements.txt
-
-# List contents for debugging purposes (optional)
-RUN ls -a
 
 # Expose the port your app runs on
 EXPOSE 8080
