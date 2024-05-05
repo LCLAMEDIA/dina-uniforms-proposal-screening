@@ -22,6 +22,7 @@ def create_report_document():
     notion_ops.create_test_page()
     return {}, 200
 
+@app.route("/check_status")
 
 def run_analysis(url: str, page_id: str):
     prompts_ops = PromptsOperations()
@@ -40,6 +41,7 @@ def run_analysis(url: str, page_id: str):
     
     proposal_ops.run()
 
+
 @app.route("/analyse_proposal", methods=["POST"])
 def analyse_proposal():
     inputs = request.json
@@ -56,3 +58,4 @@ def analyse_proposal():
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    

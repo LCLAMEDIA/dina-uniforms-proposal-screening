@@ -125,14 +125,11 @@ class NotionOperator:
             for key, item in dot_point.items():
                 dot_points.append(
                     self.create_bullet_point(
-                        key, underline=True, children=[self.create_paragraph_block(item)]
+                        key, underline=True, subtext=item
                     )
                 )
 
-        return self.create_toggle_block(
-            f"{analysis.prompt_obj.get('display_name')}",
-            [prompt_section, description, analysis_text] + dot_points,
-        )
+        return [prompt_section, description, analysis_text] + dot_points
 
     def format_timeline(self, timeline: Analysis):
         # Headings
@@ -184,7 +181,7 @@ class NotionOperator:
             if (
                 "analysis" in analysis.response
             ):  # TODO - Change this to a class variable and handle in there?
-                dot_point_blocks.append(self.format_analysis(analysis))
+                dot_point_blocks += self.format_analysis(analysis)
             elif "timeline" in analysis.response:
                 timeline_block = self.format_timeline(analysis)
             elif "cost_value" in analysis.response:
@@ -193,8 +190,9 @@ class NotionOperator:
         # Initialise the order of output    
         analysis_blocks += timeline_block
         analysis_blocks += cost_value_block
-        for dot_point_block in dot_point_blocks:
-            analysis_blocks.append(dot_point_block)
+        analysis_blocks += dot_point_blocks
+        # for dot_point_block in dot_point_blocks:
+        #     analysis_blocks.append(dot_point_block)
 
         # Create page children objects
         children = [
@@ -204,7 +202,7 @@ class NotionOperator:
         self.client.blocks.children.append(block_id=page_id, children=children)
 
     def create_test_page(self):
-        id = {"Title": {"title": [{"text": {"content": "Test"}}]}}
+        id = {"Title": {"title": [{"text": {"content": "Test @liam@lclamedia.com"}}]}}
         properties = id | {"Date": {"type": "date", "date": {"start": "2023-10-10"}}}
         children = [
             self.create_heading_block("Test Heading 1"),
@@ -213,7 +211,7 @@ class NotionOperator:
                 "Test Toggle", [self.create_paragraph_block("Test Paragraph")]
             ),
             self.create_bullet_point(
-                "test_bullet_point", [self.create_paragraph_block("test text")]
+                "test_bullet_point", [self.create_paragraph_block("test text @liam@lclamedia.com")]
             ),
         ]
         self.client.pages.create(
