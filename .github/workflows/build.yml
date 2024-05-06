@@ -70,7 +70,7 @@ jobs:
           --project dina-uniform-group \
           --region australia-southeast1 \
           --memory '8Gi' \
-          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest \
+          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest \
           --cpu 2.0 \
           --allow-unauthenticated \
           --timeout 3600
