@@ -1,6 +1,6 @@
 class PromptsOperations:
     def __init__(self):
-        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt, self.risk_management_analysis_prompt]
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt, self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
@@ -9,7 +9,8 @@ class PromptsOperations:
             'uniform_specification_prompt': self.uniform_specification_prompt,
             'customer_support_service_prompt': self.customer_support_service_prompt,
             'long_term_partnership_proposal_prompt': self.long_term_partnership_proposal_prompt,
-            'risk_management_analsis_prompt': self.risk_management_analysis_prompt
+            'risk_management_analsis_prompt': self.risk_management_analysis_prompt,
+            'compliance_evaluation_prompt': self.compliance_evaluation_analysis_prompt
         }
 
     def get_system_prompt(self):
@@ -157,6 +158,24 @@ class PromptsOperations:
             """
         }
     
+    def compliance_evaluation_prompt(self):
+        return {
+            "name": "compliance_evaluation",
+            "display_name": "Compliance",
+            "description": "Analyze the compliance of the proposal with relevant regulations and standards.",
+            "prompt": """
+            Analyze the tender proposal's adherence to applicable laws, regulations, and industry standards. Identify any areas where the proposal may not comply with these requirements.
+            Your output should be a valid JSON response of format:
+             {
+                "analysis": "Your Full Analysis",
+                "dot_point_summary": [
+                    {'your dot point title': "Your analysis/reasoning/reference to proposal for this dot point"},
+                    {'your second dot point title': "Your analysis/reasoning/reference to proposal for this dot point"}
+                ]
+            }
+            """
+        }
+
         
     def combine_dot_point_prompt(self):
         return {

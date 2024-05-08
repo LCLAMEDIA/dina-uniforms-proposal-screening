@@ -231,7 +231,7 @@ class ProposalScreeningOperations:
         return Analysis('', prompt_obj, cost_values_combined)
     
     def handle_combining_chunk_analysis(self, key, value):
-        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt', 'customer_support_services_prompt', 'long_term_partnership_potential_prompt', 'risk_management_analysis_prompt']
+        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt', 'customer_support_services_prompt', 'long_term_partnership_potential_prompt', 'risk_management_analysis_prompt', 'compliance_evaluation_prompt']
         timeline_prompts = ['timelines_prompt']
         cost_value_prompts = ['cost_value_prompt']
         if key in dot_point_analysis_prompts:
