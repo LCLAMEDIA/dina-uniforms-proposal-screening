@@ -31,7 +31,7 @@ class PostgresOperations:
         """
         task_id = str(uuid.uuid4())
         status = 'In Progress'
-        progress = 0.01
+        progress = 0.1
         start_time = datetime.now()
 
         self.set_status(task_id, status, progress, start_time=start_time)
@@ -73,7 +73,7 @@ class PostgresOperations:
         Finalize the task by setting its status to 'Done', progress to 100, and end_time to current timestamp.
         """
         query = sql.SQL("""
-        UPDATE task_status SET status = 'Done', progress = 100.0, end_time = CURRENT_TIMESTAMP
+        UPDATE task_status SET status = 'Done', progress = 1.00, end_time = CURRENT_TIMESTAMP
         WHERE task_id = %s;
         """)
         self.cursor.execute(query, (task_id,))

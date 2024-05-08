@@ -20,6 +20,7 @@ class DocumentContentExtractor:
 
     def extract_content(self):
         content_parts = []
+        logging.info("In DocumentContentExtractor")
         for element in self.doc.element.body:
             if element.tag.endswith('p'):  # Paragraph
                 para = [e for e in self.doc.paragraphs if e._element is element][0]
@@ -92,6 +93,7 @@ class ProposalScreeningOperations:
     def extract_text(self, document_path: str):
         # Extract text from downloaded document
         if document_path.endswith("docx"):
+            logging.info("[Extract Text] Using DocumentExtractor")
             content = DocumentContentExtractor(document_path).extract_content()
         elif document_path.endswith("pdf"):
             pass
@@ -270,9 +272,9 @@ class ProposalScreeningOperations:
     
     def run(self):
         proposal_name = "Proposal"
+        logging.info("Downloading File")
         file_location = self.download_file(self.proposal_url,'proposal.docx')
-        logging.info(f"File Exists: {os.path.exists(file_location)}")
-        #file_location = '_tmp/coles_proposal.docx'
+        logging.info("File Downloaded")
         
         # Extract text from proposal
         text = self.extract_text(file_location)
