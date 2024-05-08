@@ -20,6 +20,7 @@ class DocumentContentExtractor:
 
     def extract_content(self):
         content_parts = []
+        logging.info("In DocumentContentExtractor")
         for element in self.doc.element.body:
             if element.tag.endswith('p'):  # Paragraph
                 para = [e for e in self.doc.paragraphs if e._element is element][0]
@@ -92,6 +93,7 @@ class ProposalScreeningOperations:
     def extract_text(self, document_path: str):
         # Extract text from downloaded document
         if document_path.endswith("docx"):
+            logging.info("[Extract Text] Using DocumentExtractor")
             content = DocumentContentExtractor(document_path).extract_content()
         elif document_path.endswith("pdf"):
             pass
@@ -228,6 +230,19 @@ class ProposalScreeningOperations:
         prompt_obj = self.prompt_ops.prompt_mapping.get(key)() 
         return Analysis('', prompt_obj, cost_values_combined)
     
+    def handle_combining_chunk_analysis(self, key, value):
+        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt']
+        timeline_prompts = ['timelines_prompt']
+        cost_value_prompts = ['cost_value_prompt']
+        if key in dot_point_analysis_prompts:
+            analysis_obj = self.handle_dot_point_analysis_prompts(key,value)
+        elif key in timeline_prompts:
+            analysis_obj = self.handle_timelines_prompts(key, value)
+        elif key in cost_value_prompts:
+            analysis_obj = self.handle_cost_value_prompts(key, value)
+        
+        return analysis_obj
+    
     def combine_chunked_analysis(self, analysis_list: list[Analysis]):
         # Loop over all chunks, concatenating their analysis by prompt
         analysis_by_prompt = {}
@@ -239,28 +254,27 @@ class ProposalScreeningOperations:
                     analysis_by_prompt[single_prompt_analysis.prompt_name] = analysis_by_prompt[single_prompt_analysis.prompt_name] + [single_prompt_analysis]
                     
         all_analysis = []
-        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt']
-        timeline_prompts = ['timelines_prompt']
-        cost_value_prompts = ['cost_value_prompt']
-        for key, value in analysis_by_prompt.items():
-            logging.info(f"[{key}: {value}]")
-            if key in dot_point_analysis_prompts:
-                analysis_obj = self.handle_dot_point_analysis_prompts(key,value)
-            elif key in timeline_prompts:
-                analysis_obj = self.handle_timelines_prompts(key, value)
-            elif key in cost_value_prompts:
-                analysis_obj = self.handle_cost_value_prompts(key, value)
-            
-            all_analysis.append(analysis_obj)
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            # Submit all tasks to the executor
+            futures = [executor.submit(self.handle_combining_chunk_analysis,key, value) for key, value in analysis_by_prompt.items()]
+
+            # Optionally, wait for all futures to complete and handle any exceptions
+            for future in as_completed(futures):
+                try:
+                    # Result method would raise any exceptions caught during the execution of the task
+                    analysis_result = future.result()
+                    all_analysis.append(analysis_result)
+                except Exception as e:
+                    logging.error(f"Error processing single prompt in chunk: {e}")
         
         return all_analysis
 
     
     def run(self):
         proposal_name = "Proposal"
+        logging.info("Downloading File")
         file_location = self.download_file(self.proposal_url,'proposal.docx')
-        logging.info(f"File Exists: {os.path.exists(file_location)}")
-        #file_location = '_tmp/coles_proposal.docx'
+        logging.info("File Downloaded")
         
         # Extract text from proposal
         text = self.extract_text(file_location)

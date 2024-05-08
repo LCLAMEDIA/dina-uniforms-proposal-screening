@@ -1,15 +1,16 @@
 class PromptsOperations:
     def __init__(self):
-        self.all_prompts = [self.timelines_prompt, self.cost_value_prompt, self.eligibility_prompt, self.in_person_requirements_prompt]
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
             'eligibility_prompt': self.eligibility_prompt,
             'in_person_requirements_prompt': self.in_person_requirements_prompt,
+            'uniform_specification_prompt': self.uniform_specification_prompt
         }
 
     def get_system_prompt(self):
-        return "You are assessing a new tender proposal for our company, we are trying to win the tender to do business with this client. You are trying to identify any aspects of this proposal that we should be aware of/bring attention to. Check carefully for small terms and conditions that may trip us up, summarise requirements that we need to fulfill"
+        return "You are assessing a new tender proposal for our uniform supplying company, we are trying to win the tender to do business with this client. You are trying to identify any aspects of this proposal that we should be aware of/bring attention to. Check carefully for small terms and conditions that may trip us up. Use Australian English."
    
     def timelines_prompt(self):
         return {
@@ -62,7 +63,26 @@ class PromptsOperations:
             ]
         }"""
         }
-        
+    
+    
+    def uniform_specification_prompt(self):
+        return {
+            "name": "uniform_specification_prompt",
+            "display_name": "Uniform Specification",
+            "description": "Analysis specific to uniform supplying requirements",
+            "prompt": """
+        Analyse the following extract for a tender proposal to supply uniforms/clothing. You are looking specifically for things related to uniform specification and requirements. Things such as: Bespoke vs Buy (Requires custom items? or standard items), Uniform Allocations based off role (how many items are allocated to full-time,part-time, casual etc). If these two examples arent present, mention that theyre not present. Only return answers directly related to uniform specifications and requirements.
+        Your output should be a valid JSON response of format:
+        {
+            "analysis": "Your Full analysis",
+            "dot_point_summary": [
+                {'specification 1': "Requirements for this specification"},
+                {'specification 2': "requirements for this specification"}
+            ]
+        }
+        """
+        }
+    
     def in_person_requirements_prompt(self):
         return {
             "name": "in_person_requirements_prompt",
@@ -103,7 +123,7 @@ class PromptsOperations:
             "name": "combine_analysis_prompt",
             "prompt": """
         You will be provided a list of analysis' from an earlier analysis of a tender proposal. These were generated using different chunks of the same proposal, so some of them may have overlapping information/say the same thing.
-        I want you to form a cohesive analysis utilising these, making sure that we're not duplicating information. Specify important aspects of the proposal to be aware of. Keep it succinct and to 2-3 sentences.
+        I want you to form a cohesive analysis utilising these, making sure that we're not duplicating information. Specify important aspects of the proposal to be aware of. Keep it short and succinct and to MAX 2 sentences.
         Your response should be a valid json of the following format
         {
             "analysis": "Your combined analysis"
