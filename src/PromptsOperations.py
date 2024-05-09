@@ -1,6 +1,6 @@
 class PromptsOperations:
     def __init__(self):
-        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt, self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
@@ -8,9 +8,9 @@ class PromptsOperations:
             'in_person_requirements_prompt': self.in_person_requirements_prompt,
             'uniform_specification_prompt': self.uniform_specification_prompt,
             'customer_support_service_prompt': self.customer_support_service_prompt,
-            'long_term_partnership_proposal_prompt': self.long_term_partnership_proposal_prompt,
-            'risk_management_analsis_prompt': self.risk_management_analysis_prompt,
-            'compliance_evaluation_prompt': self.compliance_evaluation_analysis_prompt
+            'long_term_partnership_potential_prompt': self.long_term_partnership_potential_prompt,
+            'risk_management_analysis_prompt': self.risk_management_analysis_prompt,
+            'compliance_evaluation_prompt': self.compliance_evaluation_prompt
         }
 
     def get_system_prompt(self):
@@ -107,11 +107,11 @@ class PromptsOperations:
         
     def customer_support_service_prompt(self):
         return {
-            "name": "customer_suppoert_service_prompt",
+            "name": "customer_support_service_prompt",
             "display_name": "Customer Support",
             "description": "Analysis specific to customer support",
             "prompt": """ 
-            Analyze the customer support services outlined in the tender proposal. Focus on the scope and quality of support provided, including available communication channels and response times. Consider how these services align with the expected standards and requirements of the tender.
+            Analyze the customer support services described in the tender proposal. Focus on the scope and quality of the support, including the communication channels offered and their response times. Evaluate how these services meet the expected standards and requirements specified in the tender. Provide a detailed, concise, and descriptive response, keeping it short.
             Your output should be a valid JSON response of format:
              {
                 "analysis": "Your Full Analysis",
@@ -129,7 +129,7 @@ class PromptsOperations:
             "display_name": "Long-term Partnership Potential",
             "description": "Analyze the potential for long-term partnerships beyond the scope of the tender",
             "prompt": """ 
-             Analyze the tender proposal to identify elements that suggest the potential for a long-term partnership. Consider factors such as the scalability of services, alignment with future goals, and past performance stability. Evaluate the readiness of the proposing party to adapt to future changes and challenges. 
+             Analyze the tender proposal to identify elements that suggest the potential for a long-term partnership. Consider factors such as the scalability of services, alignment with future goals, and past performance stability. Evaluate the readiness of the proposing party to adapt to future changes and challenges. Provide detailed, concise, and descriptive information.
              Your output should be a valid JSON response of format:
              {
                 "analysis": "Your Full Analysis",
@@ -146,7 +146,7 @@ class PromptsOperations:
             "display_name": "Risk Management",
             "description": "Analyze key risks in the tender proposal",
             "prompt": """
-            Analyze the tender proposal to pinpoint potential risks that could undermine the project. Focus on identifying major risks and proposing effective mitigation strategies. 
+            Analyze the tender proposal to pinpoint potential risks that could undermine the project. Focus on identifying major risks and proposing effective mitigation strategies. Provide detailed, concise, and descriptive information.
             Your output should be a valid JSON response of format:
              {
                 "analysis": "Your Full Analysis",
@@ -164,7 +164,7 @@ class PromptsOperations:
             "display_name": "Compliance",
             "description": "Analyze the compliance of the proposal with relevant regulations and standards.",
             "prompt": """
-            Analyze the tender proposal's adherence to applicable laws, regulations, and industry standards. Identify any areas where the proposal may not comply with these requirements.
+            Analyze the tender proposal's adherence to applicable laws, regulations, and industry standards. Identify any areas where the proposal may not comply with these requirements.Provide detailed, concise, and descriptive information.
             Your output should be a valid JSON response of format:
              {
                 "analysis": "Your Full Analysis",
