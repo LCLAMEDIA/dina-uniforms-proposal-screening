@@ -45,9 +45,6 @@ virtualenv venv
    ```sh
    source venv/bin/activate
    ```
-
-Continuing from where we left off, I'll add the section on installing dependencies and provide brief descriptions for each class based on the filenames you've uploaded. I'll keep the class descriptions general, as I can't inspect the content of the files directly from here.
-
 ---
 
 After activating the virtual environment, install the project dependencies by running:
@@ -58,3 +55,135 @@ pip install -r src/requirements.txt
 
 This command reads the `requirements.txt` file in your project directory, installing all the necessary Python packages listed there. Ensure you have a `requirements.txt` file that lists all dependencies.
 
+
+Here's how to properly set up and run the described Flask application, which includes operations for proposal screening and managing the status of tasks:
+
+### Prerequisites
+Before running the application, you need to have several API keys and passwords, as well as set up a proper environment:
+
+1. **API Keys and Passwords**:
+   - `OPENAI_KEY`: Used for operations involving OpenAI services.
+   - `NOTION_KEY`: Needed for operations involving Notion API.
+   - `Postgres Password`: Essential for accessing your PostgreSQL database.
+
+   To obtain these keys, please consult with Liam Armitage.
+
+2. **Environment Setup**:
+   - Ensure you have a Python virtual environment set up and all the required modules installed.
+   - Navigate into your project's source directory by running:
+     ```bash
+     cd src
+     ```
+
+### Running the Application
+After setting up your environment and navigating to the correct directory, start the Flask application by running:
+```bash
+python app.py
+```
+
+### Flask Application Routes and Functions Explanation
+The application includes several routes and functions designed for different operations:
+
+1. **Status Check**:
+   - Route: `@app.route('/status/<task_id>', methods=['GET'])`
+   - Functionality: Retrieves the status of a given task using its `task_id` from a PostgreSQL database.
+   - Utilizes a `PostgresOperations` class to handle database operations.
+
+2. **Proposal Analysis**:
+   - Route: `@app.route('/analyse_proposal_backend', methods=['POST'])`
+   - Triggered internally to handle analysis operations in the background.
+   - Calls the `run_analysis` function with data from a POST request to process a proposal document.
+
+3. **Initiating Proposal Analysis**:
+   - Route: `@app.route("/analyse_proposal", methods=["POST"])`
+   - Initiates the analysis of a proposal.
+   - It creates a new page in Notion for the proposal, starts a database entry for the run, and enqueues the task for background processing.
+
+4. **Task Enqueueing**:
+   - `enqueue_task` function sends tasks to Google Cloud Tasks for background processing.
+   - Specifies the endpoint, payload, and timing for the task execution.
+
+### Testing the Application with Flask
+To test the Flask application locally:
+
+1. **Ensure Flask is Installed**:
+   Ensure Flask is installed in your environment:
+   ```bash
+   pip install Flask
+   ```
+
+2. **Run the Flask Application**:
+   Use the following command to start the Flask server:
+   ```bash
+   flask run
+   ```
+   or
+   ```bash
+   python app.py
+   ```
+   This command starts the application with debugging enabled and makes the server accessible on your local network.
+
+3. **Testing Routes**:
+   You can test the routes using tools like Postman or cURL. For example, to check the status of a task:
+   ```bash
+   curl http://localhost:5000/status/1234
+   ```
+   Replace `1234` with the actual task ID you wish to query.
+
+
+To test the routes that handle POST requests in your Flask application, such as `/analyse_proposal` and `/analyse_proposal_backend`, you'll need to understand how to structure the body of the POST request. This body should be formatted as a JSON object containing the necessary keys and values expected by the functions. Below, I’ll explain the required structure for these requests, and how to use `curl` to send a POST request for testing purposes.
+
+### Key Functions and Expected Request Body
+
+1. **`analyse_proposal`**:
+   - **Description**: Initiates the proposal analysis process by creating a Notion page and enqueuing a background task for detailed analysis.
+   - **Expected Body**:
+     - `title`: The title for the new Notion page that will be created for this proposal.
+     - `url`: The URL of the proposal document to be analyzed.
+   - **Example JSON Body**:
+     ```json
+     {
+       "title": "New Uniform Proposal",
+       "url": "https://example.com/proposal.docx"
+     }
+     ```
+
+2. **`analyse_proposal_backend`**:
+   - **Description**: Processes the analysis of the proposal in the background.
+   - **Expected Body**:
+     - `url`: The URL of the proposal document to analyze.
+     - `page_id`: The ID of the Notion page where the analysis will be stored.
+     - `run_id`: A unique identifier for this run of the analysis.
+   - **Example JSON Body**:
+     ```json
+     {
+       "url": "https://example.com/proposal.docx",
+       "page_id": "abcdef123456",
+       "run_id": "1234567890"
+     }
+     ```
+
+### Sending POST Requests Using `curl`
+
+To send these requests using `curl`, you can use the following commands, making sure to replace the placeholder values with actual data relevant to your application:
+
+1. **Testing `/analyse_proposal`**:
+   ```bash
+   curl -X POST http://localhost:5000/analyse_proposal \
+   -H "Content-Type: application/json" \
+   -d '{"title": "New Uniform Proposal", "url": "https://example.com/proposal.docx"}'
+   ```
+
+2. **Testing `/analyse_proposal_backend`**:
+   ```bash
+   curl -X POST http://localhost:5000/analyse_proposal_backend \
+   -H "Content-Type: application/json" \
+   -d '{"url": "https://example.com/proposal.docx", "page_id": "abcdef123456", "run_id": "1234567890"}'
+   ```
+
+These `curl` commands:
+- Use the `-X POST` flag to specify that a POST request is being made.
+- Include `-H "Content-Type: application/json"` to set the header indicating that the body of the request is in JSON format.
+- Use `-d` to provide the data (body) of the request, formatted as a JSON string.
+
+By using these commands, you can effectively test your Flask routes to ensure they are receiving and processing data as expected.
