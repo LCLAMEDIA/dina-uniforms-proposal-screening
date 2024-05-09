@@ -10,6 +10,7 @@ from PromptsOperations import PromptsOperations
 from GPTOperations import GPTOperations
 from NotionOperator import NotionOperator
 from Analysis import Analysis
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,10 +18,11 @@ class DocumentContentExtractor:
     def __init__(self, document_path):
         self.doc = Document(document_path)
         logging.info(self.doc.element.body)
-
+        
     def extract_content(self):
         content_parts = []
-        logging.info("In DocumentContentExtractor")
+        dataframes = []  # List to store DataFrames
+        logging.info("Starting content extraction.")
         for element in self.doc.element.body:
             if element.tag.endswith('p'):  # Paragraph
                 para = [e for e in self.doc.paragraphs if e._element is element][0]
@@ -29,12 +31,29 @@ class DocumentContentExtractor:
                     content_parts.append(text)
             elif element.tag.endswith('tbl'):  # Table
                 table = [t for t in self.doc.tables if t._element is element][0]
-                table_data = self._table_to_json(table)
-                # Convert the table data to a string representation
-                table_str = self._table_data_to_string(table_data)
-                content_parts.append(table_str)
+                if table:
+                    table_data = self._table_to_json(table)
+                    if table_data:
+                        df = pd.DataFrame(table_data)
+                        dataframes.append(df)
+                        table_str = self._table_data_to_string(table_data)
+                        content_parts.append(table_str)
+                    else:
+                        logging.info("Empty table encountered, skipping")
+        
+         # Print each DataFrame in the array
+        for i, df in enumerate(dataframes):
+            print(f"DataFrame {i+1}:\n{df}\n")
+                 
+        # Save each DataFrame to a separate sheet in an Excel file
+        # with pd.ExcelWriter('DataFrames.xlsx') as writer:
+        #     for i, df in enumerate(dataframes):
+        #         df.to_excel(writer, sheet_name=f'DataFrame {i+1}')
+        #         print(f"DataFrame {i+1}:\n{df}\n")
+        
         # Join all parts into one flattened string
         return '\n'.join(content_parts)
+
 
     def _table_to_json(self, table):
         headers = [cell.text.strip() for cell in table.rows[0].cells]
@@ -234,7 +253,6 @@ class ProposalScreeningOperations:
         dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt', 'customer_support_service_prompt', 'long_term_partnership_potential_prompt', 'risk_management_analysis_prompt', 'compliance_evaluation_prompt']
         timeline_prompts = ['timelines_prompt']
         cost_value_prompts = ['cost_value_prompt']
-        print(f"key: {key} value: {value}")
         if key in dot_point_analysis_prompts:
             analysis_obj = self.handle_dot_point_analysis_prompts(key,value)
         elif key in timeline_prompts:
