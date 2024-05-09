@@ -10,6 +10,20 @@ This software is provided "as is", without warranty of any kind, express or impl
 
 This program is proprietary software; redistribution and/or modification are not permitted without the express permission of LCLA Media.
 
+
+You can modify the disclaimer to include a note about potential additional charges resulting from overuse during testing. Here’s how you can phrase it:
+
+---
+
+### Disclaimer for Testing
+If you are testing the Dina Uniform Proposal Screening tool, please be aware that there is a limit set on the number of queries that can be sent to GPT-4. This limit is designed to manage resource utilization and ensure efficient operation of the tool under typical usage conditions.
+
+We strongly recommend that testers and developers take this limit into consideration when performing extensive testing or developing features that require repeated interactions with GPT-4. Exceeding these limits may not only result in temporary suspension of GPT-4 service access but could also incur additional charges due to excessive usage.
+
+For detailed information on the specific limits or to discuss increasing your query capacity for development purposes, please contact the system administrator or the person responsible for managing your API keys.
+
+---
+
 ## **What this tool does**
 
 The Dina Uniform Proposal Screening tool processes proposal documents from companies seeking a new uniform manufacturer, analyzing these based on client requirements. It:
