@@ -1,3 +1,4 @@
+from typing import Dict, Any
 class PromptsOperations:
     def __init__(self):
         """
@@ -16,11 +17,11 @@ class PromptsOperations:
             'compliance_evaluation_prompt': self.compliance_evaluation_prompt
         }
 
-    def get_system_prompt(self):
+    def get_system_prompt(self) -> str:
         """Return the general system prompt for evaluating new tender proposals, including instructions to focus on small terms and conditions and use Australian English."""
         return "You are assessing a new tender proposal for our uniform supplying company, we are trying to win the tender to do business with this client. You are trying to identify any aspects of this proposal that we should be aware of/bring attention to. Check carefully for small terms and conditions that may trip us up. Use Australian English."
    
-    def timelines_prompt(self):
+    def timelines_prompt(self) -> Dict[str, Any]:
         """Return the details for analyzing timelines in a tender proposal, including instructions to extract key dates, describe their significance, and format the response as JSON with a specific structure."""
         return {
                 "name": "timelines_prompt",
@@ -39,7 +40,7 @@ class PromptsOperations:
             }"""
         }
         
-    def cost_value_prompt(self):
+    def cost_value_prompt(self) -> Dict[str, any]:
         """Return the details for analyzing cost and value in a tender proposal, focusing on monetary values and product volume, and format the response as JSON with a structured output of key-value pairs."""
         return {
                 "name": "cost_value_prompt",
@@ -57,7 +58,7 @@ class PromptsOperations:
             }"""
         }
    
-    def eligibility_prompt(self):
+    def eligibility_prompt(self) -> Dict[str, any]:
         """Provide the details for assessing the eligibility aspects of a tender proposal, focusing on potential risks and eligibility criteria, and summarize the findings in a structured JSON format."""
         return {
             "name": "eligibility_prompt",
@@ -76,7 +77,7 @@ class PromptsOperations:
         }
     
     
-    def uniform_specification_prompt(self):
+    def uniform_specification_prompt(self) -> Dict[str, any]:
         """Generate the prompt for analyzing uniform specifications within a tender proposal, including requirements for custom or standard items and uniform allocations, and present the output in a structured JSON format."""
         return {
             "name": "uniform_specification_prompt",
@@ -95,7 +96,7 @@ class PromptsOperations:
         """
         }
     
-    def in_person_requirements_prompt(self):
+    def in_person_requirements_prompt(self) -> Dict[str, any]:
         """Create the prompt for identifying in-person requirements from a tender proposal, such as staff location needs, and summarize the findings in a structured JSON format."""
         return {
             "name": "in_person_requirements_prompt",
@@ -114,7 +115,7 @@ class PromptsOperations:
         """
         }
         
-    def customer_support_service_prompt(self):
+    def customer_support_service_prompt(self) -> Dict[str, any]:
         """Provide the prompt for evaluating customer support services described in a tender proposal, focusing on scope, quality, and compliance with expected standards, formatted as structured JSON output."""
 
         return {
@@ -134,7 +135,7 @@ class PromptsOperations:
             """
         }
         
-    def long_term_partnership_potential_prompt(self):
+    def long_term_partnership_potential_prompt(self) -> Dict[str, any]:
         """Generate the prompt to analyze elements within a tender proposal that suggest potential for long-term partnership, focusing on scalability and alignment with future goals, formatted as JSON."""
 
         return {
@@ -153,7 +154,7 @@ class PromptsOperations:
             }
             """
         }
-    def risk_management_analysis_prompt(self):
+    def risk_management_analysis_prompt(self) -> Dict[str, any]:
         """Create the prompt to identify and analyze potential risks in a tender proposal, focusing on major risks and mitigation strategies, with the findings formatted as structured JSON."""
 
         return {
@@ -173,7 +174,7 @@ class PromptsOperations:
             """
         }
     
-    def compliance_evaluation_prompt(self):
+    def compliance_evaluation_prompt(self) -> Dict[str, any]:
         """Provide the prompt for analyzing compliance of a tender proposal with applicable laws, regulations, and standards, and present the analysis and recommendations in a structured JSON format."""
         return {
             "name": "compliance_evaluation",
