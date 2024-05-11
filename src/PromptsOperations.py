@@ -1,5 +1,8 @@
 class PromptsOperations:
     def __init__(self):
+        """
+        Initializes the PromptsOperations class, setting up the prompt mapping.
+        """
         self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
@@ -14,9 +17,11 @@ class PromptsOperations:
         }
 
     def get_system_prompt(self):
+        """Return the general system prompt for evaluating new tender proposals, including instructions to focus on small terms and conditions and use Australian English."""
         return "You are assessing a new tender proposal for our uniform supplying company, we are trying to win the tender to do business with this client. You are trying to identify any aspects of this proposal that we should be aware of/bring attention to. Check carefully for small terms and conditions that may trip us up. Use Australian English."
    
     def timelines_prompt(self):
+        """Return the details for analyzing timelines in a tender proposal, including instructions to extract key dates, describe their significance, and format the response as JSON with a specific structure."""
         return {
                 "name": "timelines_prompt",
                 "display_name": "Proposal Timelines",
@@ -35,6 +40,7 @@ class PromptsOperations:
         }
         
     def cost_value_prompt(self):
+        """Return the details for analyzing cost and value in a tender proposal, focusing on monetary values and product volume, and format the response as JSON with a structured output of key-value pairs."""
         return {
                 "name": "cost_value_prompt",
                 "display_name": "Cost & Value Analysis",
@@ -52,6 +58,7 @@ class PromptsOperations:
         }
    
     def eligibility_prompt(self):
+        """Provide the details for assessing the eligibility aspects of a tender proposal, focusing on potential risks and eligibility criteria, and summarize the findings in a structured JSON format."""
         return {
             "name": "eligibility_prompt",
             "display_name": "Proposal Eligibility",
@@ -70,6 +77,7 @@ class PromptsOperations:
     
     
     def uniform_specification_prompt(self):
+        """Generate the prompt for analyzing uniform specifications within a tender proposal, including requirements for custom or standard items and uniform allocations, and present the output in a structured JSON format."""
         return {
             "name": "uniform_specification_prompt",
             "display_name": "Uniform Specification",
@@ -88,6 +96,7 @@ class PromptsOperations:
         }
     
     def in_person_requirements_prompt(self):
+        """Create the prompt for identifying in-person requirements from a tender proposal, such as staff location needs, and summarize the findings in a structured JSON format."""
         return {
             "name": "in_person_requirements_prompt",
             "display_name": "In Person Requirements",
@@ -106,6 +115,8 @@ class PromptsOperations:
         }
         
     def customer_support_service_prompt(self):
+        """Provide the prompt for evaluating customer support services described in a tender proposal, focusing on scope, quality, and compliance with expected standards, formatted as structured JSON output."""
+
         return {
             "name": "customer_support_service_prompt",
             "display_name": "Customer Support",
@@ -124,6 +135,8 @@ class PromptsOperations:
         }
         
     def long_term_partnership_potential_prompt(self):
+        """Generate the prompt to analyze elements within a tender proposal that suggest potential for long-term partnership, focusing on scalability and alignment with future goals, formatted as JSON."""
+
         return {
             "name": "long_term_partnership_potential_prompt",
             "display_name": "Long-term Partnership Potential",
@@ -141,6 +154,8 @@ class PromptsOperations:
             """
         }
     def risk_management_analysis_prompt(self):
+        """Create the prompt to identify and analyze potential risks in a tender proposal, focusing on major risks and mitigation strategies, with the findings formatted as structured JSON."""
+
         return {
             "name": "risk_management_analysis",
             "display_name": "Risk Management",
@@ -159,6 +174,7 @@ class PromptsOperations:
         }
     
     def compliance_evaluation_prompt(self):
+        """Provide the prompt for analyzing compliance of a tender proposal with applicable laws, regulations, and standards, and present the analysis and recommendations in a structured JSON format."""
         return {
             "name": "compliance_evaluation",
             "display_name": "Compliance",
