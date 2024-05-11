@@ -4,13 +4,14 @@ class PromptsOperations:
         """
         Initializes the PromptsOperations class, setting up the prompt mapping.
         """
-        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.analyze_table_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
             'eligibility_prompt': self.eligibility_prompt,
             'in_person_requirements_prompt': self.in_person_requirements_prompt,
             'uniform_specification_prompt': self.uniform_specification_prompt,
+            'analyze_table_prompt': self.analyze_table_prompt,
             'customer_support_service_prompt': self.customer_support_service_prompt,
             'long_term_partnership_potential_prompt': self.long_term_partnership_potential_prompt,
             'risk_management_analysis_prompt': self.risk_management_analysis_prompt,
@@ -173,11 +174,31 @@ class PromptsOperations:
             }
             """
         }
+        
+    def analyze_table_prompt(self) -> Dict[str, any]:
+        return {
+             "name": "anayze_table_prompt",
+             "display_name": "Table Analysis",
+             "description": "Analyze the tender proposal summarize the tables ",
+             "prompt": """
+             Analyze the tender proposal and summarize the tables to provide a  short, detailed, concise analysis 
+             Your output should be a valid JSON response:
+            {
+            
+             tables: [
+                        {
+                            "table": [store table objects  that has the same values. If there's a new table created a new object],
+                            "analysis": "Provide short, detailed and concise analysis"
+                        }
+                     ]
+            }
+             """
+        }
     
     def compliance_evaluation_prompt(self) -> Dict[str, any]:
         """Provide the prompt for analyzing compliance of a tender proposal with applicable laws, regulations, and standards, and present the analysis and recommendations in a structured JSON format."""
         return {
-            "name": "compliance_evaluation",
+            "name": "compliance_evaluation_prompt",
             "display_name": "Compliance",
             "description": "Analyze the compliance of the proposal with relevant regulations and standards.",
             "prompt": """
