@@ -4,14 +4,14 @@ class PromptsOperations:
         """
         Initializes the PromptsOperations class, setting up the prompt mapping.
         """
-        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.analyze_table_prompt, self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.table_prompt  ,self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
             'eligibility_prompt': self.eligibility_prompt,
             'in_person_requirements_prompt': self.in_person_requirements_prompt,
             'uniform_specification_prompt': self.uniform_specification_prompt,
-            'analyze_table_prompt': self.analyze_table_prompt,
+            'table_prompt': self.table_prompt,
             'customer_support_service_prompt': self.customer_support_service_prompt,
             'long_term_partnership_potential_prompt': self.long_term_partnership_potential_prompt,
             'risk_management_analysis_prompt': self.risk_management_analysis_prompt,
@@ -175,22 +175,17 @@ class PromptsOperations:
             """
         }
         
-    def analyze_table_prompt(self) -> Dict[str, any]:
+    def table_prompt(self) -> Dict[str, any]:
         return {
-             "name": "anayze_table_prompt",
+             "name": "table_prompt",
              "display_name": "Table Analysis",
              "description": "Analyze the tender proposal summarize the tables ",
              "prompt": """
              Analyze the tender proposal and summarize the tables to provide a  short, detailed, concise analysis 
              Your output should be a valid JSON response:
             {
-            
-             tables: [
-                        {
-                            "table": [store table objects  that has the same values. If there's a new table created a new object],
-                            "analysis": "Provide short, detailed and concise analysis"
-                        }
-                     ]
+                "table": [store table objects]
+                "analysis": "Provide short, detailed and concise analysis"
             }
              """
         }
@@ -274,4 +269,18 @@ class PromptsOperations:
                     {'date2': "Description of date2"}
                 ]
             }"""
+        }
+    def combine_table_prompt(self) -> Dict[str, any]:
+        return {
+            "name": "combine_table_prompt",
+            "prompt": """
+            You will be provided a list of table objects generated from a tender proposal. These were generated using different chunks of the same proposal that may have overlapping tables.
+            I want you to combine any overlapping tables to form one list of unique tables, ensuring no duplicates are present. Only include tables that have relevant data.
+            Keep it to a maximum of 7 tables, prioritizing the most important and informative ones.
+            Your response should be a valid JSON of the following format:
+            {
+                "table": [store table objects]
+                "analysis": "Provide short, detailed and concise analysis"
+            }
+            """
         }
