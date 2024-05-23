@@ -201,6 +201,37 @@ class ProposalScreeningOperations:
 
         return analysis_list
     
+    def handle_table_prompts(self, key, value):
+        tables = [table.response.get('table') for table in value]
+        analysis_texts = [table.response.get('analysis') for table in value if 'analysis' in table.response]
+
+        print(f"handle_table_prompts: {tables}")
+        print(f"analysis_texts: {analysis_texts}")
+        
+        # Fetch Prompts
+        combine_table_prompt = self.prompt_ops.combine_table_prompt()
+
+        # Generate Combined Tables
+        combined_tables_response = self.gpt_ops.query_chatgpt(
+            f"{combine_table_prompt.get('prompt')} Tables: {json.dumps(tables)}"
+        )
+        combined_tables = self.gpt_ops.parse_json_response(combined_tables_response)
+
+        # Generate Combined Analysis
+        combined_analysis = {}
+        if analysis_texts:
+            combine_analysis_prompt = self.prompt_ops.combine_analysis_prompt()
+            combined_analysis_response = self.gpt_ops.query_chatgpt(
+                f"{combine_analysis_prompt.get('prompt')} Analysis: {' '.join(analysis_texts)}"
+            )
+            combined_analysis = self.gpt_ops.parse_json_response(combined_analysis_response)
+        
+        combined_output = {**combined_tables, **combined_analysis}
+
+        # Fetch the prompt object from the mapping for output
+        prompt_obj = self.prompt_ops.prompt_mapping.get(key)()
+        return Analysis('', prompt_obj, combined_output)
+
     def handle_dot_point_analysis_prompts(self, key, value):
         analysis_text = '\n[Extract]'.join([analysis.response.get('analysis') for analysis in value])
         analysis_dot_point_summary = json.dumps([analysis.response.get('dot_point_summary') for analysis in value])
@@ -253,12 +284,15 @@ class ProposalScreeningOperations:
         dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt', 'customer_support_service_prompt', 'long_term_partnership_potential_prompt', 'risk_management_analysis_prompt', 'compliance_evaluation_prompt']
         timeline_prompts = ['timelines_prompt']
         cost_value_prompts = ['cost_value_prompt']
+        table_prompts = ['table_prompt']
         if key in dot_point_analysis_prompts:
             analysis_obj = self.handle_dot_point_analysis_prompts(key,value)
         elif key in timeline_prompts:
             analysis_obj = self.handle_timelines_prompts(key, value)
         elif key in cost_value_prompts:
             analysis_obj = self.handle_cost_value_prompts(key, value)
+        elif key in table_prompts:
+            analysis_obj = self.handle_table_prompts(key, value)
 
         
         return analysis_obj
