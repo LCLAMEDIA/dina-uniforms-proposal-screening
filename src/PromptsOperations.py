@@ -1,18 +1,29 @@
+from typing import Dict, Any
 class PromptsOperations:
     def __init__(self):
-        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt]
+        """
+        Initializes the PromptsOperations class, setting up the prompt mapping.
+        """
+        self.all_prompts = [self.timelines_prompt, self.eligibility_prompt, self.cost_value_prompt, self.in_person_requirements_prompt, self.uniform_specification_prompt, self.table_prompt  ,self.customer_support_service_prompt, self.long_term_partnership_potential_prompt,] # self.risk_management_analysis_prompt, self.compliance_evaluation_prompt]
         self.prompt_mapping = {
             'timelines_prompt': self.timelines_prompt,
             'cost_value_prompt': self.cost_value_prompt,
             'eligibility_prompt': self.eligibility_prompt,
             'in_person_requirements_prompt': self.in_person_requirements_prompt,
-            'uniform_specification_prompt': self.uniform_specification_prompt
+            'uniform_specification_prompt': self.uniform_specification_prompt,
+            'table_prompt': self.table_prompt,
+            'customer_support_service_prompt': self.customer_support_service_prompt,
+            'long_term_partnership_potential_prompt': self.long_term_partnership_potential_prompt,
+            'risk_management_analysis_prompt': self.risk_management_analysis_prompt,
+            'compliance_evaluation_prompt': self.compliance_evaluation_prompt
         }
 
-    def get_system_prompt(self):
+    def get_system_prompt(self) -> str:
+        """Return the general system prompt for evaluating new tender proposals, including instructions to focus on small terms and conditions and use Australian English."""
         return "You are assessing a new tender proposal for our uniform supplying company, we are trying to win the tender to do business with this client. You are trying to identify any aspects of this proposal that we should be aware of/bring attention to. Check carefully for small terms and conditions that may trip us up. Use Australian English."
    
-    def timelines_prompt(self):
+    def timelines_prompt(self) -> Dict[str, Any]:
+        """Return the details for analyzing timelines in a tender proposal, including instructions to extract key dates, describe their significance, and format the response as JSON with a specific structure."""
         return {
                 "name": "timelines_prompt",
                 "display_name": "Proposal Timelines",
@@ -30,7 +41,8 @@ class PromptsOperations:
             }"""
         }
         
-    def cost_value_prompt(self):
+    def cost_value_prompt(self) -> Dict[str, any]:
+        """Return the details for analyzing cost and value in a tender proposal, focusing on monetary values and product volume, and format the response as JSON with a structured output of key-value pairs."""
         return {
                 "name": "cost_value_prompt",
                 "display_name": "Cost & Value Analysis",
@@ -47,7 +59,8 @@ class PromptsOperations:
             }"""
         }
    
-    def eligibility_prompt(self):
+    def eligibility_prompt(self) -> Dict[str, any]:
+        """Provide the details for assessing the eligibility aspects of a tender proposal, focusing on potential risks and eligibility criteria, and summarize the findings in a structured JSON format."""
         return {
             "name": "eligibility_prompt",
             "display_name": "Proposal Eligibility",
@@ -65,7 +78,8 @@ class PromptsOperations:
         }
     
     
-    def uniform_specification_prompt(self):
+    def uniform_specification_prompt(self) -> Dict[str, any]:
+        """Generate the prompt for analyzing uniform specifications within a tender proposal, including requirements for custom or standard items and uniform allocations, and present the output in a structured JSON format."""
         return {
             "name": "uniform_specification_prompt",
             "display_name": "Uniform Specification",
@@ -83,7 +97,8 @@ class PromptsOperations:
         """
         }
     
-    def in_person_requirements_prompt(self):
+    def in_person_requirements_prompt(self) -> Dict[str, any]:
+        """Create the prompt for identifying in-person requirements from a tender proposal, such as staff location needs, and summarize the findings in a structured JSON format."""
         return {
             "name": "in_person_requirements_prompt",
             "display_name": "In Person Requirements",
@@ -100,6 +115,100 @@ class PromptsOperations:
         }
         """
         }
+        
+    def customer_support_service_prompt(self) -> Dict[str, any]:
+        """Provide the prompt for evaluating customer support services described in a tender proposal, focusing on scope, quality, and compliance with expected standards, formatted as structured JSON output."""
+
+        return {
+            "name": "customer_support_service_prompt",
+            "display_name": "Customer Support",
+            "description": "Analysis specific to customer support",
+            "prompt": """ 
+            Analyze the customer support services described in the tender proposal. Focus on the scope and quality of the support, including the communication channels offered and their response times. Evaluate how these services meet the expected standards and requirements specified in the tender. Provide a detailed, concise, and descriptive response, keeping it short.
+            Your output should be a valid JSON response of format:
+             {
+                "analysis": "Your Full Analysis",
+                "dot_point_summary": [
+                    {'your dot point title': "Your analysis/reasoning/reference to proposal for this dot point"},
+                    {'your second dot point title': "Your analysis/reasoning/reference to proposal for this dot point"}
+                ]
+            }
+            """
+        }
+        
+    def long_term_partnership_potential_prompt(self) -> Dict[str, any]:
+        """Generate the prompt to analyze elements within a tender proposal that suggest potential for long-term partnership, focusing on scalability and alignment with future goals, formatted as JSON."""
+
+        return {
+            "name": "long_term_partnership_potential_prompt",
+            "display_name": "Long-term Partnership Potential",
+            "description": "Analyze the potential for long-term partnerships beyond the scope of the tender",
+            "prompt": """ 
+             Analyze the tender proposal to identify elements that suggest the potential for a long-term partnership. Consider factors such as the scalability of services, alignment with future goals, and past performance stability. Evaluate the readiness of the proposing party to adapt to future changes and challenges. Provide detailed, concise, and descriptive information.
+             Your output should be a valid JSON response of format:
+             {
+                "analysis": "Your Full Analysis",
+                "dot_point_summary": [
+                    {'your dot point title': "Your analysis/reasoning/reference to proposal for this dot point"},
+                    {'your second dot point title': "Your analysis/reasoning/reference to proposal for this dot point"}
+                ]
+            }
+            """
+        }
+    def risk_management_analysis_prompt(self) -> Dict[str, any]:
+        """Create the prompt to identify and analyze potential risks in a tender proposal, focusing on major risks and mitigation strategies, with the findings formatted as structured JSON."""
+
+        return {
+            "name": "risk_management_analysis",
+            "display_name": "Risk Management",
+            "description": "Analyze key risks in the tender proposal",
+            "prompt": """
+            Analyze the tender proposal to pinpoint potential risks that could undermine the project. Focus on identifying major risks and proposing effective mitigation strategies. Provide detailed, concise, and descriptive information.
+            Your output should be a valid JSON response of format:
+             {
+                "analysis": "Your Full Analysis",
+                "dot_point_summary": [
+                    {'your dot point title': "Your analysis/reasoning/reference to proposal for this dot point"},
+                    {'your second dot point title': "Your analysis/reasoning/reference to proposal for this dot point"}
+                ]
+            }
+            """
+        }
+        
+    def table_prompt(self) -> Dict[str, any]:
+        return {
+             "name": "table_prompt",
+             "display_name": "Table Analysis",
+             "description": "Analyze the tender proposal summarize the tables ",
+             "prompt": """
+             Analyze the tender proposal and summarize the tables to provide a  short, detailed, concise analysis 
+             Your output should be a valid JSON response:
+            {
+                "table": [store table objects]
+                "analysis": "Provide short, detailed and concise analysis"
+            }
+             """
+        }
+    
+    def compliance_evaluation_prompt(self) -> Dict[str, any]:
+        """Provide the prompt for analyzing compliance of a tender proposal with applicable laws, regulations, and standards, and present the analysis and recommendations in a structured JSON format."""
+        return {
+            "name": "compliance_evaluation_prompt",
+            "display_name": "Compliance",
+            "description": "Analyze the compliance of the proposal with relevant regulations and standards.",
+            "prompt": """
+            Analyze the tender proposal's adherence to applicable laws, regulations, and industry standards. Identify any areas where the proposal may not comply with these requirements.Provide detailed, concise, and descriptive information.
+            Your output should be a valid JSON response of format:
+             {
+                "analysis": "Your Full Analysis",
+                "dot_point_summary": [
+                    {'your dot point title': "Your analysis/reasoning/reference to proposal for this dot point"},
+                    {'your second dot point title': "Your analysis/reasoning/reference to proposal for this dot point"}
+                ]
+            }
+            """
+        }
+
         
     def combine_dot_point_prompt(self):
         return {
@@ -160,4 +269,18 @@ class PromptsOperations:
                     {'date2': "Description of date2"}
                 ]
             }"""
+        }
+    def combine_table_prompt(self) -> Dict[str, any]:
+        return {
+            "name": "combine_table_prompt",
+            "prompt": """
+            You will be provided a list of table objects generated from a tender proposal. These were generated using different chunks of the same proposal that may have overlapping tables.
+            I want you to combine any overlapping tables to form one list of unique tables, ensuring no duplicates are present. Only include tables that have relevant data.
+            Keep it to a maximum of 7 tables, prioritizing the most important and informative ones.
+            Your response should be a valid JSON of the following format:
+            {
+                "table": [store table objects]
+                "analysis": "Provide short, detailed and concise analysis"
+            }
+            """
         }

@@ -10,6 +10,7 @@ from PromptsOperations import PromptsOperations
 from GPTOperations import GPTOperations
 from NotionOperator import NotionOperator
 from Analysis import Analysis
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,10 +18,11 @@ class DocumentContentExtractor:
     def __init__(self, document_path):
         self.doc = Document(document_path)
         logging.info(self.doc.element.body)
-
+        
     def extract_content(self):
         content_parts = []
-        logging.info("In DocumentContentExtractor")
+        dataframes = []  # List to store DataFrames
+        logging.info("Starting content extraction.")
         for element in self.doc.element.body:
             if element.tag.endswith('p'):  # Paragraph
                 para = [e for e in self.doc.paragraphs if e._element is element][0]
@@ -29,12 +31,29 @@ class DocumentContentExtractor:
                     content_parts.append(text)
             elif element.tag.endswith('tbl'):  # Table
                 table = [t for t in self.doc.tables if t._element is element][0]
-                table_data = self._table_to_json(table)
-                # Convert the table data to a string representation
-                table_str = self._table_data_to_string(table_data)
-                content_parts.append(table_str)
+                if table:
+                    table_data = self._table_to_json(table)
+                    if table_data:
+                        df = pd.DataFrame(table_data)
+                        dataframes.append(df)
+                        table_str = self._table_data_to_string(table_data)
+                        content_parts.append(table_str)
+                    else:
+                        logging.info("Empty table encountered, skipping")
+        
+         # Print each DataFrame in the array
+        for i, df in enumerate(dataframes):
+            print(f"DataFrame {i+1}:\n{df}\n")
+                 
+        # Save each DataFrame to a separate sheet in an Excel file
+        # with pd.ExcelWriter('DataFrames.xlsx') as writer:
+        #     for i, df in enumerate(dataframes):
+        #         df.to_excel(writer, sheet_name=f'DataFrame {i+1}')
+        #         print(f"DataFrame {i+1}:\n{df}\n")
+        
         # Join all parts into one flattened string
         return '\n'.join(content_parts)
+
 
     def _table_to_json(self, table):
         headers = [cell.text.strip() for cell in table.rows[0].cells]
@@ -182,6 +201,37 @@ class ProposalScreeningOperations:
 
         return analysis_list
     
+    def handle_table_prompts(self, key, value):
+        tables = [table.response.get('table') for table in value]
+        analysis_texts = [table.response.get('analysis') for table in value if 'analysis' in table.response]
+
+        print(f"handle_table_prompts: {tables}")
+        print(f"analysis_texts: {analysis_texts}")
+        
+        # Fetch Prompts
+        combine_table_prompt = self.prompt_ops.combine_table_prompt()
+
+        # Generate Combined Tables
+        combined_tables_response = self.gpt_ops.query_chatgpt(
+            f"{combine_table_prompt.get('prompt')} Tables: {json.dumps(tables)}"
+        )
+        combined_tables = self.gpt_ops.parse_json_response(combined_tables_response)
+
+        # Generate Combined Analysis
+        combined_analysis = {}
+        if analysis_texts:
+            combine_analysis_prompt = self.prompt_ops.combine_analysis_prompt()
+            combined_analysis_response = self.gpt_ops.query_chatgpt(
+                f"{combine_analysis_prompt.get('prompt')} Analysis: {' '.join(analysis_texts)}"
+            )
+            combined_analysis = self.gpt_ops.parse_json_response(combined_analysis_response)
+        
+        combined_output = {**combined_tables, **combined_analysis}
+
+        # Fetch the prompt object from the mapping for output
+        prompt_obj = self.prompt_ops.prompt_mapping.get(key)()
+        return Analysis('', prompt_obj, combined_output)
+
     def handle_dot_point_analysis_prompts(self, key, value):
         analysis_text = '\n[Extract]'.join([analysis.response.get('analysis') for analysis in value])
         analysis_dot_point_summary = json.dumps([analysis.response.get('dot_point_summary') for analysis in value])
@@ -231,15 +281,19 @@ class ProposalScreeningOperations:
         return Analysis('', prompt_obj, cost_values_combined)
     
     def handle_combining_chunk_analysis(self, key, value):
-        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt']
+        dot_point_analysis_prompts = ['in_person_requirements_prompt', 'eligibility_prompt', 'uniform_specification_prompt', 'customer_support_service_prompt', 'long_term_partnership_potential_prompt', 'risk_management_analysis_prompt', 'compliance_evaluation_prompt']
         timeline_prompts = ['timelines_prompt']
         cost_value_prompts = ['cost_value_prompt']
+        table_prompts = ['table_prompt']
         if key in dot_point_analysis_prompts:
             analysis_obj = self.handle_dot_point_analysis_prompts(key,value)
         elif key in timeline_prompts:
             analysis_obj = self.handle_timelines_prompts(key, value)
         elif key in cost_value_prompts:
             analysis_obj = self.handle_cost_value_prompts(key, value)
+        elif key in table_prompts:
+            analysis_obj = self.handle_table_prompts(key, value)
+
         
         return analysis_obj
     
