@@ -15,7 +15,7 @@ class GPTOperations:
         self.client = OpenAI(api_key=api_key)
         self.prompts_ops = prompts_ops
         
-    def query_chatgpt(self, query, model="gpt-4-turbo"):
+    def query_chatgpt(self, query, model="gpt-4o"):
         """
         Sends a query to ChatGPT and returns the response.
         """
