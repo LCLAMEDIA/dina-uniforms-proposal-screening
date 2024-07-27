@@ -1,6 +1,6 @@
 
 
-#Credentials
+# Credentials
 earned.json
 token.json
 crendentials.json
@@ -12,6 +12,7 @@ _local/
 __pycache__/
 *.py[cod]
 *$py.class
+.DS_Store
 
 # C extensions
 *.so
