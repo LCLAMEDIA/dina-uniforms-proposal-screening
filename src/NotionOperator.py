@@ -4,9 +4,6 @@ from datetime import date, datetime
 import json
 import logging
 from Analysis import Analysis
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class NotionOperator:
     def __init__(
