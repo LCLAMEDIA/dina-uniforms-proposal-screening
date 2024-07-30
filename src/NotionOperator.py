@@ -4,9 +4,6 @@ from datetime import date, datetime
 import json
 import logging
 from Analysis import Analysis
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class NotionOperator:
     def __init__(
@@ -106,11 +103,10 @@ class NotionOperator:
         return new_properties
 
     def create_table(self, table_data):
-        if table_data and isinstance(table_data[0], dict):
-            table_width = len(table_data[0].keys())
-        else:
-            table_width = 3  # Fallback to a default value if table_data is empty or invalid
+        if not table_data or not isinstance(table_data[0], dict):
+            return None
 
+        table_width = len(table_data[0].keys())
         table_block = {
             "object": "block",
             "type": "table",
@@ -118,14 +114,13 @@ class NotionOperator:
                 "table_width": table_width,
                 "has_column_header": True,
                 "has_row_header": False,
-                "children": []  # Add an empty list for children
+                "children": []
             },
         }
 
         # Add column headers
-        if table_data and isinstance(table_data[0], dict):
-            column_headers = [[{"text": {"content": key}}] for key in table_data[0].keys()]
-            table_block["table"]["children"].append({"table_row": {"cells": column_headers}})
+        column_headers = [[{"text": {"content": str(key)}}] for key in table_data[0].keys()]
+        table_block["table"]["children"].append({"table_row": {"cells": column_headers}})
 
         # Add table rows
         for row in table_data:
@@ -134,37 +129,34 @@ class NotionOperator:
                 if len(cells) == table_width:
                     table_block["table"]["children"].append({"table_row": {"cells": cells}})
                 else:
-                    print(f"Warning: Skipping row with incorrect number of cells: {row}")
+                    logging.warning(f"Skipping row with incorrect number of cells: {row}")
+
+        # Ensure there's at least one data row (excluding header)
+        if len(table_block["table"]["children"]) < 2:
+            return None
 
         return table_block
-    
+
     def format_table(self, analysis: Analysis):
-        # Headings
         prompt_section = self.create_heading_block(
             f"{analysis.prompt_obj.get('display_name')}"
         )
-
-        # Description
         description = self.create_paragraph_block(
             f"{analysis.prompt_obj.get('description')}", code=True
         )
-
         analysis_text = self.create_paragraph_block(
-            f"{analysis.response.get('analysis')[0:1900]}"
+            f"{analysis.response.get('analysis', '')[:1900]}"
         )
 
-        # Table
+        blocks = [prompt_section, description, analysis_text]
+
         table_data = analysis.response.get("table", [])
         table_block = self.create_table(table_data)
-        print(f"""
-            ..... Initializing table_block
-            prompt_section: {prompt_section}
-            description: {description}
-            analysis_text: {analysis_text}
-            table_block: {table_block}
-            """)
+        if table_block:
+            blocks.append(table_block)
 
-        return [prompt_section, description, analysis_text] + [table_block]
+        logging.info(f"Formatted table for {analysis.prompt_obj.get('display_name')}")
+        return blocks
     
     def format_analysis(self, analysis: Analysis):
         # Headings
@@ -240,28 +232,40 @@ class NotionOperator:
 
     def create_page_from_analysis(self, proposal_name: str, analysis_list: list[Analysis], page_id: str):
         current_date = datetime.now().strftime("%Y-%m-%d")
-
-        analysis_blocks = []
-        dot_point_blocks = []
-        for idx, analysis in enumerate(analysis_list):
-            if "table" in analysis.response:
-                table_block = self.format_table(analysis)
-                analysis_blocks += table_block
-            elif "analysis" in analysis.response:
-                dot_point_blocks += self.format_analysis(analysis)
-            elif "timeline" in analysis.response:
-                timeline_block = self.format_timeline(analysis)
-                analysis_blocks += timeline_block
-            elif "cost_value" in analysis.response:
-                cost_value_block = self.format_cost_value(analysis)
-                analysis_blocks += cost_value_block
-
-        # Create page children objects
         children = [
             self.create_heading_block(f"[{proposal_name}] Analysis - {current_date}")
         ]
-        children += analysis_blocks
-        self.client.blocks.children.append(block_id=page_id, children=children)
+
+        for analysis in analysis_list:
+            if not isinstance(analysis, Analysis):
+                logging.warning(f"Skipping invalid analysis object: {analysis}")
+                continue
+
+            if "table" in analysis.response:
+                children.extend(self.format_table(analysis))
+            elif "analysis" in analysis.response:
+                children.extend(self.format_analysis(analysis))
+            elif "timeline" in analysis.response:
+                children.extend(self.format_timeline(analysis))
+            elif "cost_value" in analysis.response:
+                children.extend(self.format_cost_value(analysis))
+            else:
+                logging.warning(f"Unknown analysis type for {analysis.prompt_obj.get('display_name')}")
+
+        # Filter out any None values
+        children = [child for child in children if child is not None]
+
+        if not children:
+            logging.error("No content generated for Notion page")
+            return
+
+        # Add blocks to the page
+        try:
+            self.client.blocks.children.append(block_id=page_id, children=children)
+            logging.info(f"Successfully added {len(children)} blocks to Notion page")
+        except Exception as e:
+            logging.error(f"Error adding blocks to Notion page: {str(e)}")
+            raise
 
     def create_test_page(self):
         id = {"Title": {"title": [{"text": {"content": "Test @liam@lclamedia.com"}}]}}
