@@ -9,14 +9,32 @@ from GoogleDocsOperations import GoogleDocsOperations
 from PromptsOperations import PromptsOperations
 from GPTOperations import GPTOperations
 from NotionOperator import NotionOperator
+from DocxOperator import DocxOperator
 from Analysis import Analysis
 import pandas as pd
+import io
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO)
 
 class DocumentContentExtractor:
-    def __init__(self, document_path):
-        self.doc = Document(document_path)
+    def __init__(self, document_path: Optional[str] = None, document_bytes: Optional[bytes] = None):
+        """
+        Accepts either document from path or document as bytes.
+        """
+
+        document_data = None
+        
+        if isinstance(document_path, str):
+            document_data = document_path
+
+        if isinstance(document_bytes, bytes):
+            document_data = io.BytesIO(document_bytes)
+        
+        if not document_data:
+            raise Exception('Document data not populated')
+        
+        self.doc = Document(document_data)
         logging.info(self.doc.element.body)
         
     def extract_content(self):
@@ -59,7 +77,9 @@ class DocumentContentExtractor:
         headers = [cell.text.strip() for cell in table.rows[0].cells]
         table_json = []
         for row in table.rows[1:]:
-            row_data = {headers[i]: cell.text.strip() for i, cell in enumerate(row.cells)}
+            logging.error(headers)
+            logging.error(row.cells)
+            row_data = {headers[i]: cell.text.strip() for i, cell in enumerate(row.cells) if i + 1 <= len(headers)}
             table_json.append(row_data)
         return table_json
 
@@ -77,6 +97,7 @@ class ProposalScreeningOperations:
         prompts_ops: PromptsOperations,
         gpt_ops: GPTOperations,
         notion_ops: NotionOperator,
+        docx_ops: DocxOperator,
         page_id: str
     ):
         self.proposal_url = proposal_url
@@ -85,6 +106,7 @@ class ProposalScreeningOperations:
         self.prompt_ops = prompts_ops
         self.gpt_ops = gpt_ops
         self.notion_ops = notion_ops
+        self.docx_ops = docx_ops
         self.page_id = page_id
 
     def split_into_chunks(
@@ -109,12 +131,12 @@ class ProposalScreeningOperations:
 
         return chunks
 
-    def extract_text(self, document_path: str):
+    def extract_text(self, document_path: Optional[str] = None, document_bytes: Optional[bytes] = None, document_filename: str = ''):
         # Extract text from downloaded document
-        if document_path.endswith("docx"):
+        if document_filename.endswith("docx"):
             logging.info("[Extract Text] Using DocumentExtractor")
-            content = DocumentContentExtractor(document_path).extract_content()
-        elif document_path.endswith("pdf"):
+            content = DocumentContentExtractor(document_path=document_path, document_bytes=document_bytes).extract_content()
+        elif document_filename.endswith("pdf"):
             pass
         else:
             pass
@@ -360,3 +382,29 @@ class ProposalScreeningOperations:
         #         ]
         #     }
         # ]
+
+    def run_analysis_from_sharepoint(
+            self,
+            document_bytes: bytes,
+            document_filename: str
+        ):
+        filename_without_extension = os.path.splitext(document_filename)[0]
+        
+        # Extract text from proposal
+        text = self.extract_text(document_bytes=document_bytes, document_filename=document_filename)
+
+        # Split into chunks to feed into AI
+        chunks = self.split_into_chunks(text, chunk_size=16000)
+    
+        # Loop over all chunks and generate an analysis for each
+        analysis_list = self.analyse_all_chunks(chunks)
+            
+        combined_analysis_list = self.combine_chunked_analysis(analysis_list)
+        
+        for analysis in combined_analysis_list:
+            print(analysis)
+
+        return self.docx_ops.create_page_from_analysis(proposal_name=filename_without_extension, analysis_list=combined_analysis_list, page_id=self.page_id)
+        
+        
+        
