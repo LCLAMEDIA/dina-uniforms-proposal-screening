@@ -9,6 +9,13 @@ on:
         required: true
         default: v0
         type: string
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prd
 
 env:
   IMAGE: australia-southeast1-docker.pkg.dev/dina-uniform-group/dina-images/proposal-screening
@@ -39,11 +46,20 @@ jobs:
         gcloud auth configure-docker \
           australia-southeast1-docker.pkg.dev
     
-    - name: Build and Push Docker image
+    - name: Build and Push Docker image (Prod)
+      if: github.ref == 'refs/heads/main' && inputs.environment == 'prd'
       uses: docker/build-push-action@v2
       with:
         file: ./Dockerfile
         tags: ${{env.IMAGE}}:latest, ${{env.IMAGE}}:${{ inputs.version }}
+        push: true
+
+    - name: Build and Push Docker image (Dev)
+      if: inputs.environment == 'dev'
+      uses: docker/build-push-action@v2
+      with:
+        file: ./Dockerfile
+        tags: ${{env.IMAGE}}-dev:latest, ${{env.IMAGE}}-dev:${{ inputs.version }}
         push: true
   
   deploy:
@@ -60,11 +76,28 @@ jobs:
         service_account_key: ${{secrets.SVC_ACCOUNT_JSON}}
         export_default_credentials: true
 
-    - name: Deploy Flask app to Cloud run # TODO - Add other API keys to google secret manager
+    - name: Deploy Flask app to Cloud run (Prod) # TODO - Add other API keys to google secret manager
+      if: github.ref == 'refs/heads/main' && inputs.environment == 'prd'
       run: |
         gcloud run deploy \
           dina-uniforms-proposal-screening \
           --image ${{env.IMAGE}}:${{ inputs.version }} \
+          --platform managed \
+          --service-account automations@dina-uniform-group.iam.gserviceaccount.com \
+          --project dina-uniform-group \
+          --region australia-southeast1 \
+          --memory '8Gi' \
+          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest \
+          --cpu 2.0 \
+          --allow-unauthenticated \
+          --timeout 3600
+
+    - name: Deploy Flask app to Cloud run (Dev)
+      if: inputs.environment == 'dev'
+      run: |
+        gcloud run deploy \
+          dina-uniforms-proposal-screening-dev \
+          --image ${{env.IMAGE}}-dev:${{ inputs.version }} \
           --platform managed \
           --service-account automations@dina-uniform-group.iam.gserviceaccount.com \
           --project dina-uniform-group \
