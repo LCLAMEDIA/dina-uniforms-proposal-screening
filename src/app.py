@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Request, Response
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 
 from GoogleDocsOperations import GoogleDocsOperations
@@ -68,15 +69,15 @@ def analyse_proposal_from_sharepoint():
 
         file_name = request.headers.get('x-ms-file-name')
 
-        if "file" not in request.files:
-            return {'message': 'No Files found!'}, 422
+        data = request.json
+
+        if data.get("$content-type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or not data.get("$content"):
+            return jsonify({"error": "Invalid content type"}), 422
         
-        file = request.files["file"]
+        if not file_name:
+            return jsonify({'message': "No selected file"}, 422)
         
-        if file.filename == "":
-            return {'message': "No selected file"}, 422
-        
-        file_bytes = file.stream.read()        
+        file_bytes = base64.b64decode(data["$content"])    
         
         # Run analysis synchronously
         try:
