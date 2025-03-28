@@ -69,7 +69,9 @@ def analyse_proposal_from_sharepoint():
 
         file_name = request.headers.get('x-ms-file-name')
 
-        data = request.json
+        data = request.get_data()
+        logging.debug(f"Raw data received: {data}")
+        data = json.loads(data.decode('utf-8'))
 
         if data.get("$content-type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or not data.get("$content"):
             return jsonify({"error": "Invalid content type"}), 422
