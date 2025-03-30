@@ -70,8 +70,8 @@ def analyse_proposal_from_sharepoint():
         file_name = request.headers.get('x-ms-file-name')
 
         data = request.get_data()
-        logging.info(f"Raw data received1: {request.get_data()}")
-        logging.info(f"Raw data received2: {request.get_json()}")
+        logging.info(f"Raw data received1: {request.get_data(as_text=True)}")
+        logging.info(f"Raw data received2: {request.get_json(force=True)}")
         data = json.loads(data)
 
         if data.get("$content-type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or not data.get("$content"):
