@@ -101,7 +101,7 @@ def analyse_proposal_from_sharepoint():
             docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_bytes, document_filename=file_name)
         except Exception as e:
             import traceback
-            traceback.print_exc()
+            logging.error(f"Printing Traceback: {traceback.print_exc()}")
             logging.error(f"Error in run_analysis: {str(e)}")
         
         return Response(
@@ -110,6 +110,8 @@ def analyse_proposal_from_sharepoint():
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
+        import traceback
+        logging.error(f"Printing Traceback: {traceback.print_exc()}")
         logging.error(f"Error in analyse_proposal: {str(e)}")
         return jsonify({"error": "Failed to initiate proposal analysis"}), 500
 
