@@ -68,10 +68,12 @@ def analyse_proposal_from_sharepoint():
     try:
 
         file_name = request.headers.get('x-ms-file-name')
-        content_type = request.headers.get('x-ms-file-name')
+        content_type = request.headers.get('Content-Type')
+
+        logging.info(f"Attempting to analyse file: {file_name} of type {content_type}")
 
         if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return jsonify({"error": "Invalid content type"}), 422
+            return jsonify({"error": f"Invalid content type for file {file_name}"}), 422
         
         if not file_name:
             return jsonify({'message': "No selected file"}, 422)
