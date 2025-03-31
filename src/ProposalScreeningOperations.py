@@ -388,6 +388,8 @@ class ProposalScreeningOperations:
             document_bytes: bytes,
             document_filename: str
         ):
+        logging.info(f"[ProposalScreeningOperations] Running analysis for file: {document_filename}")
+
         filename_without_extension = os.path.splitext(document_filename)[0]
         
         # Extract text from proposal
@@ -401,6 +403,7 @@ class ProposalScreeningOperations:
             
         combined_analysis_list = self.combine_chunked_analysis(analysis_list)
         
+        logging.info(f"[ProposalScreeningOperations] Combining {len(combined_analysis_list)} analysis for file: {document_filename}")
         for analysis in combined_analysis_list:
             print(analysis)
 

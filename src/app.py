@@ -70,7 +70,7 @@ def analyse_proposal_from_sharepoint():
         file_name = request.headers.get('x-ms-file-name')
         content_type = request.headers.get('Content-Type')
 
-        logging.info(f"Attempting to analyse file: {file_name} of type {content_type}")
+        logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
 
         if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             return jsonify({"error": f"Invalid content type for file {file_name}"}), 422
@@ -96,6 +96,8 @@ def analyse_proposal_from_sharepoint():
                 page_id=None,
                 docx_ops=docx_ops
             )
+
+            logging.info(f"Attempting to analyse file: {file_name} of type: {content_type}")
             
             docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_content, document_filename=file_name)
         except Exception as e:
@@ -103,6 +105,7 @@ def analyse_proposal_from_sharepoint():
             logging.error(f"Printing Traceback: {traceback.print_exc()}")
             logging.error(f"Error in run_analysis: {str(e)}")
         
+        logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
         return Response(
             docx_stream,
             mimetype=mimetype,

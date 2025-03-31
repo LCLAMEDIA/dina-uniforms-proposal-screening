@@ -94,7 +94,9 @@ class DocxOperator:
                 self.document.add_paragraph(key, style='ListBullet')
                 self.document.add_paragraph(item, style='ListBullet2')
 
-    def create_docx_from_analysis(self, proposal_name: str, analysis_list: list[Analysis], page_id: str):
+    def create_docx_from_analysis(self, proposal_name: str, analysis_list: list[Analysis]):
+        logging.info(f"[DocxOperator] Creating file for the analysis result of {proposal_name}")
+
         current_date = datetime.now().strftime("%Y-%m-%d")
         self.document.add_heading(f"[{proposal_name}] Analysis - {current_date}", level=1)
 
@@ -104,12 +106,20 @@ class DocxOperator:
                 continue
 
             if "table" in analysis.response:
+                logging.info(f"[DocxOperator] Formatting table for the analysis result of {proposal_name}")
+
                 self.format_table(analysis)
             elif "analysis" in analysis.response:
+                logging.info(f"[DocxOperator] Formatting analysis for the analysis result of {proposal_name}")
+
                 self.format_analysis(analysis)
             elif "timeline" in analysis.response:
+                logging.info(f"[DocxOperator] Formatting timeline for the analysis result of {proposal_name}")
+
                 self.format_timeline(analysis)
             elif "cost_value" in analysis.response:
+                logging.info(f"[DocxOperator] Formatting cost value for the analysis result of {proposal_name}")
+
                 self.format_cost_value(analysis)
             else:
                 logging.warning(f"Unknown analysis type for {analysis.prompt_obj.get('display_name')}")
@@ -119,8 +129,7 @@ class DocxOperator:
         docx_stream.seek(0)
         docx_bytes = docx_stream.getvalue()
 
-        # with open('sample.docx', 'wb') as f:
-        #     f.write(docx_bytes)
+        logging.info(f"[DocxOperator] File saved for the analysis result of {proposal_name}")
 
         str_now = datetime.now().strftime("%d %b %Y")
 
