@@ -106,7 +106,10 @@ def analyse_proposal_from_sharepoint():
         return Response(
             docx_stream,
             mimetype=mimetype,
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "x-ms-file-name": filename
+                }
         )
     except Exception as e:
         import traceback
