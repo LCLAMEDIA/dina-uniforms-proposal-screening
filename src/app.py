@@ -68,19 +68,15 @@ def analyse_proposal_from_sharepoint():
     try:
 
         file_name = request.headers.get('x-ms-file-name')
+        content_type = request.headers.get('x-ms-file-name')
 
-        data = request.get_data()
-        logging.info(f"Raw data received1: {request.get_data(as_text=True)}")
-        logging.info(f"Raw data received2: {request.get_json(force=True)}")
-        data = json.loads(data)
-
-        if data.get("$content-type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or not data.get("$content"):
+        if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             return jsonify({"error": "Invalid content type"}), 422
         
         if not file_name:
             return jsonify({'message': "No selected file"}, 422)
         
-        file_bytes = base64.b64decode(data["$content"])    
+        file_content = request.get_data()
         
         # Run analysis synchronously
         try:
@@ -99,7 +95,7 @@ def analyse_proposal_from_sharepoint():
                 docx_ops=docx_ops
             )
             
-            docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_bytes, document_filename=file_name)
+            docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_content, document_filename=file_name)
         except Exception as e:
             import traceback
             logging.error(f"Printing Traceback: {traceback.print_exc()}")
