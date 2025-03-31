@@ -404,7 +404,7 @@ class ProposalScreeningOperations:
         for analysis in combined_analysis_list:
             print(analysis)
 
-        return self.docx_ops.create_page_from_analysis(proposal_name=filename_without_extension, analysis_list=combined_analysis_list, page_id=self.page_id)
+        return self.docx_ops.create_docx_from_analysis(proposal_name=filename_without_extension, analysis_list=combined_analysis_list, page_id=self.page_id)
         
         
         

@@ -94,7 +94,7 @@ class DocxOperator:
                 self.document.add_paragraph(key, style='ListBullet')
                 self.document.add_paragraph(item, style='ListBullet2')
 
-    def create_page_from_analysis(self, proposal_name: str, analysis_list: list[Analysis], page_id: str):
+    def create_docx_from_analysis(self, proposal_name: str, analysis_list: list[Analysis], page_id: str):
         current_date = datetime.now().strftime("%Y-%m-%d")
         self.document.add_heading(f"[{proposal_name}] Analysis - {current_date}", level=1)
 
@@ -122,4 +122,8 @@ class DocxOperator:
         # with open('sample.docx', 'wb') as f:
         #     f.write(docx_bytes)
 
-        return docx_bytes, f"{proposal_name}.docx", 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        str_now = datetime.now().strftime("%d %b %Y")
+
+        analysed_proposal_filename = f"{proposal_name} [Analysed - {str_now}].docx"
+
+        return docx_bytes, analysed_proposal_filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
