@@ -405,9 +405,9 @@ class ProposalScreeningOperations:
         
         logging.info(f"[ProposalScreeningOperations] Combining {len(combined_analysis_list)} analysis for file: {document_filename}")
         for analysis in combined_analysis_list:
-            print(analysis)
+            logging.info(f'Analysis: {analysis}')
 
-        return self.docx_ops.create_docx_from_analysis(proposal_name=filename_without_extension, analysis_list=combined_analysis_list, page_id=self.page_id)
+        return self.docx_ops.create_docx_from_analysis(proposal_name=filename_without_extension, analysis_list=combined_analysis_list)
         
         
         

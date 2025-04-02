@@ -73,10 +73,14 @@ def analyse_proposal_from_sharepoint():
         logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
 
         if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return jsonify({"error": f"Invalid content type for file {file_name}"}), 422
+            response = jsonify({"error": f"Invalid content type for file {file_name}"})
+            response.status_code = 422
+            return response
         
         if not file_name:
-            return jsonify({'message': "No selected file"}, 422)
+            response = jsonify({'message': "No selected file"})
+            response.status_code = 422
+            return response
         
         file_content = request.get_data()
         
@@ -102,7 +106,9 @@ def analyse_proposal_from_sharepoint():
             docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_content, document_filename=file_name)
         except Exception as e:
             logging.error(f"Error in run_analysis: {str(e)}")
-            return jsonify({'message': f"Failure to run analysis. Error: {e}"}, 500)
+            response = jsonify({'message': f"Failure to run analysis. Error: {e}"})
+            response.status_code = 500
+            return response
         
         logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
         return Response(
@@ -118,7 +124,9 @@ def analyse_proposal_from_sharepoint():
         import traceback
         logging.error(f"Printing Traceback: {traceback.print_exc()}")
         logging.error(f"Error in analyse_proposal: {str(e)}")
-        return jsonify({"error": "Failed to initiate proposal analysis"}), 500
+        response = jsonify({"error": "Failed to initiate proposal analysis"}) 
+        response.status_code = 500
+        return response
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
