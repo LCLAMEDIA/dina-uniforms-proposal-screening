@@ -2,7 +2,7 @@ from docx import Document
 from datetime import datetime
 import logging
 from Analysis import Analysis
-import tempfile
+import pytz
 import io
 
 class DocxOperator:
@@ -97,8 +97,18 @@ class DocxOperator:
     def create_docx_from_analysis(self, proposal_name: str, analysis_list: list[Analysis]):
         logging.info(f"[DocxOperator] Creating file for the analysis result of {proposal_name}")
 
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        self.document.add_heading(f"[{proposal_name}] Analysis - {current_date}", level=1)
+        australia_tz = pytz.timezone("Australia/Sydney")
+        str_now = datetime.now(australia_tz).strftime("%d %b %Y %H:%M")
+        doc_title = self.document.add_heading('', level=1)
+        doc_title_run1 = doc_title.add_run('Analysis: ')
+        doc_title_run2 = doc_title.add_run(f'{proposal_name}')
+        doc_title_run2.italic = True
+
+        doc_sub_title = self.document.add_paragraph('')
+        doc_sub_title_run1 = doc_sub_title.add_run('Last Analysed: ')
+        doc_sub_title_run2 = doc_sub_title.add_run(f'{str_now}')
+        doc_sub_title_run2.bold = True
+        doc_sub_title_run2.italic = True
 
         for analysis in analysis_list:
             if not isinstance(analysis, Analysis):
@@ -131,7 +141,6 @@ class DocxOperator:
 
         logging.info(f"[DocxOperator] File saved for the analysis result of {proposal_name}")
 
-        str_now = datetime.now().strftime("%d %b %Y")
 
         analysed_proposal_filename = f"{proposal_name} [Analysed - {str_now}].docx"
 

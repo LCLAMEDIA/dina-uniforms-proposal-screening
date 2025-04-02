@@ -101,9 +101,8 @@ def analyse_proposal_from_sharepoint():
             
             docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_content, document_filename=file_name)
         except Exception as e:
-            import traceback
-            logging.error(f"Printing Traceback: {traceback.print_exc()}")
             logging.error(f"Error in run_analysis: {str(e)}")
+            return jsonify({'message': f"Failure to run analysis. Error: {e}"}, 500)
         
         logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
         return Response(
@@ -114,6 +113,7 @@ def analyse_proposal_from_sharepoint():
                 "x-ms-file-name": filename
                 }
         )
+    
     except Exception as e:
         import traceback
         logging.error(f"Printing Traceback: {traceback.print_exc()}")
