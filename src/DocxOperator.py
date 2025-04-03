@@ -98,14 +98,14 @@ class DocxOperator:
         logging.info(f"[DocxOperator] Creating file for the analysis result of {proposal_name}")
 
         australia_tz = pytz.timezone("Australia/Sydney")
-        str_now = datetime.now(australia_tz).strftime("%d %b %Y %H:%M")
+        str_now = datetime.now(australia_tz).strftime("%d %b %Y - %I:%M:%S %p")
         doc_title = self.document.add_heading('', level=1)
         doc_title_run1 = doc_title.add_run('Analysis: ')
         doc_title_run2 = doc_title.add_run(f'{proposal_name}')
         doc_title_run2.italic = True
 
         doc_sub_title = self.document.add_paragraph('')
-        doc_sub_title_run1 = doc_sub_title.add_run('Last Analysed: ')
+        doc_sub_title_run1 = doc_sub_title.add_run('Date Analysed: ')
         doc_sub_title_run2 = doc_sub_title.add_run(f'{str_now}')
         doc_sub_title_run2.bold = True
         doc_sub_title_run2.italic = True
@@ -142,6 +142,6 @@ class DocxOperator:
         logging.info(f"[DocxOperator] File saved for the analysis result of {proposal_name}")
 
 
-        analysed_proposal_filename = f"{proposal_name} [Analysed - {str_now}].docx"
+        analysed_proposal_filename = f"[Analysed] {proposal_name}.docx"
 
         return docx_bytes, analysed_proposal_filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
