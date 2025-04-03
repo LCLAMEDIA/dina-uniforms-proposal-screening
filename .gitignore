@@ -2,6 +2,7 @@
 
 # Others
 proposal.docx
+*.docx
 
 # Credentials
 earned.json

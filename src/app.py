@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Request, Response
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+import base64
 import json
 
 from GoogleDocsOperations import GoogleDocsOperations
 from NotionOperator import NotionOperator
+from DocxOperator import DocxOperator
 from VoiceflowOperations import VoiceflowOperations
 from ProposalScreeningOperations import ProposalScreeningOperations
 from PromptsOperations import PromptsOperations
@@ -59,6 +61,72 @@ def analyse_proposal():
     except Exception as e:
         logging.error(f"Error in analyse_proposal: {str(e)}")
         return jsonify({"error": "Failed to initiate proposal analysis"}), 500
+    
+@app.route("/sharepoint/proposal/analyse", methods=["POST"])
+def analyse_proposal_from_sharepoint():
+    docx_stream, filename, mimetype = None, None, None
+    try:
+
+        file_name = request.headers.get('x-ms-file-name')
+        content_type = request.headers.get('Content-Type')
+
+        logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
+
+        if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            response = jsonify({"error": f"Invalid content type for file {file_name}"})
+            response.status_code = 422
+            return response
+        
+        if not file_name:
+            response = jsonify({'message': "No selected file"})
+            response.status_code = 422
+            return response
+        
+        file_content = request.get_data()
+        
+        # Run analysis synchronously
+        try:
+            prompts_ops = PromptsOperations()
+            gpt_ops = GPTOperations(prompts_ops=prompts_ops)
+            docx_ops = DocxOperator()
+            
+            proposal_ops = ProposalScreeningOperations(
+                proposal_url=None,
+                google_docs_ops=None,
+                voiceflow_ops=None,
+                prompts_ops=prompts_ops,
+                notion_ops=None,
+                gpt_ops=gpt_ops,
+                page_id=None,
+                docx_ops=docx_ops
+            )
+
+            logging.info(f"Attempting to analyse file: {file_name} of type: {content_type}")
+            
+            docx_stream, filename, mimetype = proposal_ops.run_analysis_from_sharepoint(document_bytes=file_content, document_filename=file_name)
+        except Exception as e:
+            logging.error(f"Error in run_analysis: {str(e)}")
+            response = jsonify({'message': f"Failure to run analysis. Error: {e}"})
+            response.status_code = 500
+            return response
+        
+        logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
+        return Response(
+            docx_stream,
+            mimetype=mimetype,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "x-ms-file-name": filename
+                }
+        )
+    
+    except Exception as e:
+        import traceback
+        logging.error(f"Printing Traceback: {traceback.print_exc()}")
+        logging.error(f"Error in analyse_proposal: {str(e)}")
+        response = jsonify({"error": "Failed to initiate proposal analysis"}) 
+        response.status_code = 500
+        return response
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
