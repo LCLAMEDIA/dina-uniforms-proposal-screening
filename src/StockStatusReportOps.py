@@ -100,8 +100,7 @@ class StockStatusReportOps:
                                 "UNIT PRICE",
                                 "SOH Value xgst",
                                 "PO Cost xgst",
-                                "On Order Cost xgst",
-                                "CHECK FOR DUPLICATES"
+                                "On Order Cost xgst"
                             ]
         self.columns_to_clip = ['qty_onhand', 'qty_SO', 'qty_PO']
         self.ssr_upload_directory = "Operations & Knowledge Base/1. Automations/STOCK STATUS REPORTING (SSR)/Upload"
@@ -121,6 +120,7 @@ class StockStatusReportOps:
             # Add new columns
             client_rows_wo_samples_df.loc[:, self.new_columns] = np.nan
             client_rows_wo_samples_df.loc[:, ["active in web"]] = np.nan.__str__()
+            client_rows_wo_samples_df.loc[:, ["CHECK FOR DUPLICATES"]] = np.nan
 
             # Set zeroes to negative values
             client_rows_wo_samples_df.loc[:, self.columns_to_clip] = client_rows_wo_samples_df.loc[:, self.columns_to_clip].clip(lower=0)
@@ -144,7 +144,7 @@ class StockStatusReportOps:
 
             # Lookup active in web
             client_rows_wo_samples_df.loc[:,'active in web'] = client_rows_wo_samples_df.loc[:,'active in web'].astype(str)
-            client_rows_wo_samples_df.loc[:,'active in web'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str).map(activeInWeb_mapping).fillna('N/A')
+            client_rows_wo_samples_df.loc[:,'active in web'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str).map(activeInWeb_mapping).fillna('0')
 
             # check if no lookup value retrieved for rows with SOH, SO, and PO
             no_lookup_filtered_df = client_rows_wo_samples_df[
@@ -219,7 +219,7 @@ class StockStatusReportOps:
     def build_excel_file_buffer(self, output_buffer: io.BytesIO, cleaned_ssr_df: pd.DataFrame) -> Tuple[io.BytesIO, Dict]:
         sum_per_client_sheet = {}
 
-        self.client_category['CURRENT CUSTOMERS'] = None
+        self.client_category = {"CURRENT CUSTOMERS": None, **self.client_category}
 
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
 
