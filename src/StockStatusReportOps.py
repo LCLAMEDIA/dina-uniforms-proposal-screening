@@ -3,16 +3,28 @@ import numpy as np
 import io
 import logging
 from typing import List, Dict, Tuple
-import urllib.parse
+import os
 import pytz
 from openpyxl import load_workbook
 from datetime import datetime
+from dateutil.parser import parse
+
+from AzureOperations import AzureOperations
+from SharePointOperations import SharePointOperations
 
 logging.basicConfig(level=logging.INFO)
 
 class StockStatusReportOps:
     
     def __init__(self, exported_file_name: str, exported_file_bytes: bytes):
+        self.azure_ops = AzureOperations()
+        access_token = self.azure_ops.get_access_token()
+
+        self.sharepoint_ops = SharePointOperations(access_token=access_token)
+
+        self.product_list_prefix = os.environ.get('PRODUCT_LIST_PREFIX')
+        self.ssr_summary_prefix = os.environ.get('SSR_SUMMARY_PREFIX')
+
         self.exported_file_name = exported_file_name
         self.exported_file_bytes = exported_file_bytes
         self.stock_status_report_sheet = None
@@ -103,10 +115,12 @@ class StockStatusReportOps:
                                 "On Order Cost xgst"
                             ]
         self.columns_to_clip = ['qty_onhand', 'qty_SO', 'qty_PO']
-        self.ssr_upload_directory = "Operations & Knowledge Base/1. Automations/STOCK STATUS REPORTING (SSR)/Upload"
         self.australia_now = datetime.now(pytz.timezone('Australia/Sydney'))
 
-    def start_automate(self) -> bool:
+
+    def start_automate(self) -> Tuple[bytes, str, str, str]:
+        logging.info("[StockStatusReportOps] Automating SSR")
+        notification_message = ''
         try:
             exported_file_df = self.excel_bytes_as_df()
 
@@ -126,10 +140,19 @@ class StockStatusReportOps:
             client_rows_wo_samples_df.loc[:, self.columns_to_clip] = client_rows_wo_samples_df.loc[:, self.columns_to_clip].clip(lower=0)
 
             # Check if any barcodes are missing
-            if client_rows_wo_samples_df[client_rows_wo_samples_df['barcode'].isnull()].empty:
-                # TODO set notification message to be saved in response header to send in teams
+            empty_barcodes_df = client_rows_wo_samples_df[client_rows_wo_samples_df['barcode'].isnull()]
+            if not empty_barcodes_df.empty:
+                logging.info("[StockStatusReportOps] Records with no barcodes found! Building notification message")
 
-                pass
+                id_list = empty_barcodes_df['ID'].tolist()
+                name_list = empty_barcodes_df['Name'].tolist()
+
+                notification_message += "Missing Barcodes for following exported items: \n"
+
+                for id_, name_ in zip(id_list, name_list):
+                    notification_message += "\t - {id_}: {name_} \n".format(id_=id_, name_=name_)
+
+                notification_message += "\n"
             
             # Get product list uploaded in sharepoint
             product_list = self.get_product_list()
@@ -155,8 +178,17 @@ class StockStatusReportOps:
             ]
 
             if not no_lookup_filtered_df.empty:
-                # TODO raise notification for no lookup value for SOH, SO, PO > 0.
-                # Send list of ID and barcodes without lookup values
+                logging.info("[StockStatusReportOps] Records with no lookup data where SOH, SO, and PO > 1 found! Building notification message")
+
+                id_list = no_lookup_filtered_df['ID'].tolist()
+                name_list = no_lookup_filtered_df['Name'].tolist()
+
+                notification_message += "No Lookup Data for following export items where SOH, SO, and PO > 0: \n"
+
+                for id_, name_ in zip(id_list, name_list):
+                    notification_message += "\t - {id_}: {name_} \n".format(id_=id_, name_=name_)
+
+                notification_message += "\n"
 
                 # Skip rows without looked up price
                 client_rows_wo_samples_df[:, :] = client_rows_wo_samples_df[~client_rows_wo_samples_df.index.isin(no_lookup_filtered_df.index)] 
@@ -179,10 +211,13 @@ class StockStatusReportOps:
                 output_buffer=output_buffer
             )
 
-            # TODO update SSR Summary
+            self.read_update_ssr_summary(sum_per_client_sheet=sum_per_client_sheet)
 
+            notification_message = f"Stock Status Report Automation now done! \n" + notification_message
 
-            return excel_file_bytes, ssr_filename
+            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+            return excel_file_bytes, ssr_filename, mimetype, notification_message
 
         except Exception as e:
             logging.exception(f"[Stock Status Report Operation] Failure to automate stock status report. Error: {e}")
@@ -206,15 +241,26 @@ class StockStatusReportOps:
         return output_buffer.getvalue()
 
     def get_product_list(self) -> pd.DataFrame:
-        # TODO read file using ff:
-        encoded_ssr_upload_path = urllib.parse.quote(self.ssr_upload_directory, safe='')
+        logging.info("[StockStatusReportOps] Getting product list")
 
-        # https://graph.microsoft.com/v1.0/sites/{{SiteID}}/drives -> get drive ID of th folder
-        # https://graph.microsoft.com/v1.0/drives/{{DriveID}}/root:/{encoded_ssr_upload_path}/children -> get download link of the product list
-            # Loop over 
-        product_list = pd.DataFrame()
+        site_id = self.sharepoint_ops.get_site_id()
+        drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
+        csv_bytes = self.sharepoint_ops.get_bytes_for_latest_file_with_prefix(prefix=self.product_list_prefix, drive_id=drive_id)
+
+        product_list = pd.read_csv(io.BytesIO(csv_bytes))
 
         return product_list
+
+    def get_ssr_summary(self) -> pd.DataFrame:
+        logging.info("[StockStatusReportOps] Getting SSR Summary")
+
+        site_id = self.sharepoint_ops.get_site_id()
+        drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
+        excel_bytes = self.sharepoint_ops.get_bytes_for_latest_file_with_prefix(prefix=self.ssr_summary_prefix, drive_id=drive_id)
+
+        ssr_summary = pd.read_excel(io.BytesIO(excel_bytes))
+
+        return ssr_summary
 
     def build_excel_file_buffer(self, output_buffer: io.BytesIO, cleaned_ssr_df: pd.DataFrame) -> Tuple[io.BytesIO, Dict]:
         sum_per_client_sheet = {}
@@ -259,7 +305,35 @@ class StockStatusReportOps:
         return final_output.getvalue(), ssr_filename
     
     def read_update_ssr_summary(self, sum_per_client_sheet: Dict):
-        # TODO read and update SSR summary from sharepoint
+        logging.info(f"[StockStatusReportOps] Trying to read and update SSR Summary")
+
+        ssr_summary_df = self.get_ssr_summary()
+
+        new_ssr_summary_df = self.generate_new_ssr_summary(sum_per_client_sheet)
+
+        short_date_now = self.australia_now.strftime('%d-%b')
+
+        excel_buffer = io.BytesIO()
+
+        fiscal_year_start, fiscal_year_end = self.get_start_end_fiscal_year()
+
+        main_sheet_title = f"{fiscal_year_start} - {fiscal_year_end} FY"
+
+        ssr_summary_filename = f"DINA Stock Status Report Overview FY{str(fiscal_year_start)[2:]}-{str(fiscal_year_end)[2:]}.xlsx"
+
+        # Write both DataFrames to different sheets in the same in-memory Excel file
+        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+            ssr_summary_df.to_excel(writer, sheet_name=main_sheet_title, index=False)
+            new_ssr_summary_df.to_excel(writer, sheet_name=f'{short_date_now}', index=False)
+
+        # Don't forget to rewind the buffer before using it
+        excel_buffer.seek(0)
+
+        site_id = self.sharepoint_ops.get_site_id()
+        drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)        
+        self.sharepoint_ops.upload_excel_file(drive_id=drive_id, excel_filename=ssr_summary_filename, file_bytes=excel_buffer.getvalue())
+
+    def generate_new_ssr_summary(self, sum_per_client_sheet: Dict) -> pd.DataFrame:
         client_soh_suffix = "SOH LIABILITY"
         client_fields = [
             "SOH VALUE",
@@ -271,20 +345,16 @@ class StockStatusReportOps:
 
         ssr_summary = pd.DataFrame([0, 1])
 
-        if self.australia_now.month >= 7:
-            fiscal_year_start = self.australia_now.year
-            fiscal_year_end = self.australia_now.year + 1
-        else:
-            fiscal_year_start = self.australia_now.year - 1
-            fiscal_year_end = self.australia_now.year
+        fiscal_year_start, fiscal_year_end = self.get_start_end_fiscal_year()
 
         ssr_summary.loc[0,0] = f"{fiscal_year_start} - {fiscal_year_end} FY"
 
         row = 0
+        short_date_now = self.australia_now.strftime('%d-%b')
         for client_name, values in sum_per_client_sheet.items():
             row += 1
             ssr_summary.loc[row,0] = f"{client_name} {client_soh_suffix}"
-            ssr_summary.loc[row,1] = self.australia_now.strftime('%d-%b')
+            ssr_summary.loc[row,1] = short_date_now
 
             soh_po_sum = 0
             for order, client_field in enumerate(client_fields, start=1):
@@ -306,4 +376,31 @@ class StockStatusReportOps:
             row += 1
             ssr_summary.loc[row,0] = ''
 
+        return ssr_summary
                             
+    def get_target_ssr_summary_table_column(self, ssr_summary_df: pd.DataFrame, target_date) -> str:
+        # Row 2 (index 1) contains the date-like values
+        second_row = ssr_summary_df.iloc[1]
+
+        # Search for the column where the parsed date matches your target
+        matched_col_index = None
+        for col in ssr_summary_df.columns:
+            try:
+                val_date = parse(str(second_row[col]), fuzzy=False).date()
+                if val_date == target_date:
+                    matched_col_index = col
+                    break
+            except (ValueError, TypeError):
+                continue
+
+        return matched_col_index
+    
+    def get_start_end_fiscal_year(self):
+        if self.australia_now.month >= 7:
+            fiscal_year_start = self.australia_now.year
+            fiscal_year_end = self.australia_now.year + 1
+        else:
+            fiscal_year_start = self.australia_now.year - 1
+            fiscal_year_end = self.australia_now.year  
+
+        return fiscal_year_start, fiscal_year_end

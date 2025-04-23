@@ -63,7 +63,7 @@ def analyse_proposal():
 
 @app.route("/sharepoint/ssr/automate", methods=["POST"])
 def analyse_proposal_from_sharepoint():
-    docx_stream, filename, mimetype = None, None, None
+    excel_file_bytes, ssr_filename, mimetype = None, None, None
     try:
 
         file_name = request.headers.get('x-ms-file-name')
@@ -94,9 +94,9 @@ def analyse_proposal_from_sharepoint():
 
             logging.info(f"Attempting to automate stock status report: {file_name} in directory: {ssr_folder}")
             
-            is_success = ssr_ops.start_automate()
+            excel_file_bytes, ssr_filename, mimetype, notification_message = ssr_ops.start_automate()
 
-            if not is_success:
+            if not excel_file_bytes:
                 logging.warning("Stock Status Report automation unsuccessful")
                 response = jsonify({'message': "Stock Status Report automation unsuccessful"})
                 response.status_code = 500
@@ -110,11 +110,12 @@ def analyse_proposal_from_sharepoint():
         
         logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
         return Response(
-            docx_stream,
+            excel_file_bytes,
             mimetype=mimetype,
             headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "x-ms-file-name": filename
+                "Content-Disposition": f"attachment; filename={ssr_filename}",
+                "x-ms-file-name": ssr_filename,
+                "x-ms-notification": notification_message
                 }
         )
     
