@@ -79,7 +79,7 @@ class SharePointOperations:
             values: List[Dict] = response_dict.get("value", [])
             filtered_values: List[Dict] = list(filter(lambda item: item.get("name", "").startswith(prefix), values))
             sorted_filtered_values = sorted(filtered_values, key=lambda x: self.parse_zulu(x.get("lastModifiedDateTime")), reverse=True)
-            shared_documents_dict = next(sorted_filtered_values, {})
+            shared_documents_dict = next(iter(sorted_filtered_values), {})
             download_url = shared_documents_dict.get("@microsoft.graph.downloadUrl")
 
             file_bytes = self.get_file_bytes_from_download_url(download_url)
