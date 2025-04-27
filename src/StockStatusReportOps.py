@@ -6,7 +6,7 @@ from typing import List, Dict, Tuple
 import os
 import pytz
 from openpyxl import load_workbook
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil.parser import parse
 
 from AzureOperations import AzureOperations
@@ -77,7 +77,8 @@ class StockStatusReportOps:
         self.columns_to_clip = ['qty_onhand', 'qty_SO', 'qty_PO']
         self.australia_now = datetime.now(pytz.timezone('Australia/Sydney'))
 
-        self.customer_config = self.get_customer_config()
+        self.ssr_summary_bytes = self.get_ssr_summary_bytes()
+        self.customer_config = self.get_customer_config(ssr_summary_bytes=self.ssr_summary_bytes)
 
         self.copy_customer_config = self.customer_config.copy(deep=True)
         self.copy_customer_config.drop(index=0, inplace=True)
@@ -227,9 +228,8 @@ class StockStatusReportOps:
 
         return excel_bytes
 
-    def get_ssr_summary_df(self) -> pd.DataFrame:
+    def get_ssr_summary_df(self, ssr_summary_bytes: bytes) -> pd.DataFrame:
         logging.info("[StockStatusReportOps] Getting SSR Summary")
-        ssr_summary_bytes = self.get_ssr_summary_bytes()
 
         fiscal_year_start, fiscal_year_end = self.get_start_end_fiscal_year()
 
@@ -239,9 +239,8 @@ class StockStatusReportOps:
 
         return ssr_summary_df
 
-    def get_customer_config(self) -> pd.DataFrame:
+    def get_customer_config(self, ssr_summary_bytes: bytes) -> pd.DataFrame:
         logging.info("[StockStatusReportOps] Getting SSR Customer Config")
-        ssr_summary_bytes = self.get_ssr_summary_bytes()
 
         customer_config = pd.read_excel(io.BytesIO(ssr_summary_bytes), sheet_name="customer_config", header=None, engine='openpyxl')
 
@@ -300,18 +299,33 @@ class StockStatusReportOps:
 
         main_sheet_title = f"JULY {fiscal_year_start} - JUNE {fiscal_year_end} FY"
 
-        ssr_summary_df = self.get_ssr_summary_df()
+        ssr_summary_df = self.get_ssr_summary_df(ssr_summary_bytes=self.ssr_summary_bytes)
 
-        ssr_summary_bytes = self.get_ssr_summary_bytes()
-
-        ssr_summary_wb = load_workbook(io.BytesIO(ssr_summary_bytes))
+        ssr_summary_wb = load_workbook(io.BytesIO(self.ssr_summary_bytes))
 
         ssr_summary_sheet = ssr_summary_wb[main_sheet_title]
 
         new_ssr_summary_dict: Dict[str, Dict] = self.generate_new_ssr_summary(sum_per_client_sheet)
 
+        target_col_idx = self.get_target_ssr_summary_table_column(ssr_summary_df=ssr_summary_df)
+
         for client_code, sum_dict in new_ssr_summary_dict.items():
-            ssr_summary_client_name = self.customer_config[self.customer_config[0] == "BUS"][2].iloc[0]
+            ssr_summary_client_name = self.customer_config[self.customer_config[0] == client_code][2].iloc[0]
+
+            client_row = self.get_target_client_row(ssr_summary_df=ssr_summary_df, ssr_customer_label=ssr_summary_client_name)
+
+            if not isinstance(client_row, int) or not isinstance(target_col_idx, int):
+                continue
+
+            for row_string, ssr_sum_fig in sum_dict.items():
+
+                fig_row = self.get_target_client_row(ssr_summary_df=ssr_summary_df, ssr_customer_label=row_string, start_idx=client_row)
+                fig_row += 1
+
+                ssr_summary_sheet.cell(row=fig_row, column=target_col_idx + 1).value = ssr_sum_fig
+
+                if isinstance(ssr_sum_fig, (int, float)):
+                    ssr_summary_sheet.cell(row=fig_row, column=target_col_idx + 1).number_format = '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)'
 
 
         excel_buffer = io.BytesIO()
@@ -319,9 +333,7 @@ class StockStatusReportOps:
         ssr_summary_filename = f"DINA Stock Status Report Overview FY{str(fiscal_year_start)[2:]}-{str(fiscal_year_end)[2:]}.xlsx"
 
         # Write both DataFrames to different sheets in the same in-memory Excel file
-        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-            ssr_summary_df.to_excel(writer, sheet_name=main_sheet_title, index=False, header=False)
-            self.customer_config.to_excel(writer, sheet_name='customer_config', index=False, header=False)
+        ssr_summary_wb.save(excel_buffer)
 
         # Don't forget to rewind the buffer before using it
         excel_buffer.seek(0)
@@ -346,24 +358,7 @@ class StockStatusReportOps:
             }
 
         return ssr_summary_dict
-                            
-    def get_target_ssr_summary_table_column(self, ssr_summary_df: pd.DataFrame, target_date) -> str:
-        # Row 2 (index 1) contains the date-like values
-        second_row = ssr_summary_df.iloc[1]
-
-        # Search for the column where the parsed date matches your target
-        matched_col_index = None
-        for col in ssr_summary_df.columns:
-            try:
-                val_date = parse(str(second_row[col]), fuzzy=False).date()
-                if val_date == target_date:
-                    matched_col_index = col
-                    break
-            except (ValueError, TypeError):
-                continue
-
-        return matched_col_index
-    
+                                
     def get_start_end_fiscal_year(self):
         if self.australia_now.month >= 7:
             fiscal_year_start = self.australia_now.year
@@ -373,3 +368,29 @@ class StockStatusReportOps:
             fiscal_year_end = self.australia_now.year  
 
         return fiscal_year_start, fiscal_year_end
+    
+    def get_target_ssr_summary_table_column(self, ssr_summary_df: pd.DataFrame) -> int | None:
+        row = ssr_summary_df.iloc[1]  # 2nd row (Python index 1)
+
+        for col_idx, val in row.items():
+            try:
+                # Try parsing the value as a date
+                parsed = parse(str(val), fuzzy=True)
+                if parsed.replace(tzinfo=timezone.utc) == self.australia_now:
+                    return col_idx
+                elif parsed.replace(tzinfo=timezone.utc) >= self.australia_now:
+                    return col_idx - 1
+            except (ValueError, TypeError) as e:
+                logging.warning(f"[StockStatusReportOps] Getting index for target date {self.australia_now} in SSR summary warning: {e}")
+                continue
+
+        return None
+
+    @staticmethod
+    def get_target_client_row(ssr_summary_df: pd.DataFrame, ssr_customer_label: str, start_idx: int = 0) -> int | None:
+        idx_list = ssr_summary_df.iloc[start_idx:].index[ssr_summary_df.iloc[start_idx:, 0] == ssr_customer_label].tolist()
+
+        if len(idx_list) > 0:
+            return idx_list[0]
+
+        return None
