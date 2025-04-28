@@ -94,21 +94,26 @@ class StockStatusReportOps:
         try:
             exported_file_df = self.excel_bytes_as_df()
 
+            logging.info("[StockStatusReportOps] Selecting client rows")
             # Filter rows to select data from clients only
             client_filter = [item for sublist in self.copy_customer_config[1] for item in sublist]
             client_rows_df = exported_file_df[exported_file_df['item_cat1'].astype(str).str.strip().astype(str).str.lower().isin({s.lower() for s in client_filter})]
 
+            logging.info("[StockStatusReportOps] Cleaning up rows with samples")
             # Remove rows that are all samples
             client_rows_wo_samples_df = client_rows_df[~client_rows_df.apply(lambda row: row.astype(str).str.contains('sample', case=False, na=False)).any(axis=1)]
 
+            logging.info("[StockStatusReportOps] Adding new columns i.e. SOH, SO, PO")
             # Add new columns
             client_rows_wo_samples_df.loc[:, self.new_columns] = np.nan
             client_rows_wo_samples_df.loc[:, ["active in web"]] = np.nan.__str__()
             client_rows_wo_samples_df.loc[:, ["CHECK FOR DUPLICATES"]] = np.nan
 
+            logging.info("[StockStatusReportOps] Converting digits negative values in SOH, SO, PO to zero")
             # Set zeroes to negative values
             client_rows_wo_samples_df.loc[:, self.columns_to_clip] = client_rows_wo_samples_df.loc[:, self.columns_to_clip].clip(lower=0)
 
+            logging.info("[StockStatusReportOps] Varifying if any barcodes are missing")
             # Check if any barcodes are missing
             empty_barcodes_df = client_rows_wo_samples_df[client_rows_wo_samples_df['barcode'].isnull()]
             if not empty_barcodes_df.empty:
@@ -124,14 +129,17 @@ class StockStatusReportOps:
 
                 notification_message += "-newline-"
 
+            logging.info("[StockStatusReportOps] Preparing lookup map for unit price and active in web")
             # Build lookup map
             unitPrice_mapping = self.product_list.groupby('barcode')['unitPrice'].first()
             activeInWeb_mapping = self.product_list.groupby('barcode')['ActiveInWeb'].first()
 
+            logging.info("[StockStatusReportOps] Performing lookup of unit price using barcode")
             # Lookup unit price
             client_rows_wo_samples_df.loc[:,'barcode'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str)
             client_rows_wo_samples_df.loc[:,'UNIT PRICE'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str).map(unitPrice_mapping).fillna(np.nan)
 
+            logging.info("[StockStatusReportOps] Performing lookup of active in web using barcode")
             # Lookup active in web
             client_rows_wo_samples_df.loc[:,'active in web'] = client_rows_wo_samples_df.loc[:,'active in web'].astype(str)
             client_rows_wo_samples_df.loc[:,'active in web'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str).map(activeInWeb_mapping).fillna('0')
@@ -144,6 +152,7 @@ class StockStatusReportOps:
                 (client_rows_wo_samples_df['UNIT PRICE'] == np.nan)
             ]
 
+            logging.info("[StockStatusReportOps] Validating rows with no lookup but has SOH, SO, and PO > 1")
             if not no_lookup_filtered_df.empty:
                 logging.info("[StockStatusReportOps] Records with no lookup data where SOH, SO, and PO > 1 found! Building notification message")
 
@@ -158,11 +167,14 @@ class StockStatusReportOps:
                 notification_message += "-newline-"
 
                 # Skip rows without looked up price
+                logging.info("[StockStatusReportOps] Skipping row without unit price")
                 client_rows_wo_samples_df[:, :] = client_rows_wo_samples_df[~client_rows_wo_samples_df.index.isin(no_lookup_filtered_df.index)] 
 
+            logging.info("[StockStatusReportOps] Replacing Null in unit price to zero")
             # Replace NA values with zero, these items has SOH, SO, and PO equals to zero
             client_rows_wo_samples_df.loc[:,'UNIT PRICE'] = client_rows_wo_samples_df.loc[:,'UNIT PRICE'].replace(np.nan, 0)
 
+            logging.info("[StockStatusReportOps] Calculating SOH, PO, and On Order cost")
             # Calculate SOH, PO, and On Order cost
             client_rows_wo_samples_df.loc[:,'SOH Value xgst'] = client_rows_wo_samples_df.loc[:,'UNIT PRICE'] * client_rows_wo_samples_df.loc[:,'qty_onhand']
             client_rows_wo_samples_df.loc[:,'PO Cost xgst'] = client_rows_wo_samples_df.loc[:,'UNIT PRICE'] * client_rows_wo_samples_df.loc[:,'qty_PO']
@@ -178,12 +190,15 @@ class StockStatusReportOps:
                 output_buffer=output_buffer
             )
 
+            logging.info("[StockStatusReportOps] Will run read and update SSR Summary function asynchronously")
             thread = threading.Thread(target=self.read_update_ssr_summary, args=(sum_per_client_sheet, ))
             thread.start()
 
             notification_message = f"Stock Status Report Automation now done! -newline-" + notification_message
 
             mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+            logging.info("[StockStatusReportOps] SSR Summary automation ends")
 
             return excel_file_bytes, ssr_filename, mimetype, notification_message
 
@@ -229,7 +244,7 @@ class StockStatusReportOps:
         return excel_bytes
 
     def get_ssr_summary_df(self, ssr_summary_bytes: bytes) -> pd.DataFrame:
-        logging.info("[StockStatusReportOps] Getting SSR Summary")
+        logging.info("[StockStatusReportOps] Getting SSR Summary Dataframe")
 
         fiscal_year_start, fiscal_year_end = self.get_start_end_fiscal_year()
 
@@ -247,6 +262,7 @@ class StockStatusReportOps:
         return customer_config
 
     def build_excel_file_buffer(self, output_buffer: io.BytesIO, cleaned_ssr_df: pd.DataFrame) -> Tuple[io.BytesIO, Dict]:
+        logging.info("[StockStatusReportOps] Building excel file buffer from dataframe")
         sum_per_client_sheet = {}
 
         new_row = {0: "CURRENT CUSTOMERS", 1: np.nan, 2: np.nan}
@@ -276,6 +292,8 @@ class StockStatusReportOps:
         return output_buffer, sum_per_client_sheet
     
     def hide_excel_fields_return_excel_bytes(self, output_buffer: io.BytesIO) -> Tuple[bytes, str]:
+        logging.info("[StockStatusReportOps] Converting excel buffer to excel workbook file buffer")
+
         output_buffer.seek(0)
         wb = load_workbook(output_buffer)
 
