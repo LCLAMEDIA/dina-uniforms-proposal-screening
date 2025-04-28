@@ -104,7 +104,7 @@ class SharePointOperations:
 
             response = requests.request("PUT", url, headers=headers, data=file_bytes)
 
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:
                 logging.info(f"[SharePointOperations] Excel file with name {excel_filename} uploaded in {filepath}. Info: <{response.status_code}> {response.text}")
 
             else:
@@ -117,7 +117,7 @@ class SharePointOperations:
     @staticmethod
     def get_file_bytes_from_download_url(download_url) -> bytes | None:
         logging.info(f"[SharePointOperations] Downloading file bytes from {download_url}")
-        
+
         response = requests.request("GET", download_url)
 
         if response.status_code == 200:
