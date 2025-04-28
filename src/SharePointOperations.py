@@ -90,7 +90,7 @@ class SharePointOperations:
 
         return None
 
-    def upload_excel_file(self, drive_id: str, excel_filename: str, file_bytes: bytes) -> bytes | None:
+    def upload_excel_file(self, drive_id: str, excel_filename: str, file_bytes: bytes) -> None:
         logging.info(f"[SharePointOperations] Uploading excel file with name {excel_filename}")
 
         for filepath in [self.ssr_output_filepath, self.ssr_input_filepath]:
@@ -107,7 +107,8 @@ class SharePointOperations:
             if response.status_code == 200:
                 logging.info(f"[SharePointOperations] Excel file with name {excel_filename} uploaded in {filepath}. Info: <{response.status_code}> {response.text}")
 
-            logging.exception(f"[SharePointOperations] Failed to upload excel file with name {excel_filename} in {filepath}. Info: <{response.status_code}> {response.text}")
+            else:
+                logging.exception(f"[SharePointOperations] Failed to upload excel file with name {excel_filename} in {filepath}. Info: <{response.status_code}> {response.text}")
 
     @staticmethod
     def parse_zulu(dt_str):
@@ -115,6 +116,8 @@ class SharePointOperations:
 
     @staticmethod
     def get_file_bytes_from_download_url(download_url) -> bytes | None:
+        logging.info(f"[SharePointOperations] Downloading file bytes from {download_url}")
+        
         response = requests.request("GET", download_url)
 
         if response.status_code == 200:

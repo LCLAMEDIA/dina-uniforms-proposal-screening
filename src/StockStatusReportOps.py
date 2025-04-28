@@ -2,7 +2,9 @@ import pandas as pd
 import numpy as np
 import io
 import logging
-from typing import List, Dict, Tuple
+from typing import Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import os
 import pytz
 from openpyxl import load_workbook
@@ -77,7 +79,7 @@ class StockStatusReportOps:
         self.columns_to_clip = ['qty_onhand', 'qty_SO', 'qty_PO']
         self.australia_now = datetime.now(pytz.timezone('Australia/Sydney'))
 
-        self.ssr_summary_bytes = self.get_ssr_summary_bytes()
+        self.ssr_summary_bytes, self.product_list = self.get_ssr_summary_and_product_list()
         self.customer_config = self.get_customer_config(ssr_summary_bytes=self.ssr_summary_bytes)
 
         self.copy_customer_config = self.customer_config.copy(deep=True)
@@ -121,13 +123,10 @@ class StockStatusReportOps:
                     notification_message += "-tab- - {id_}: {name_} -newline-".format(id_=id_, name_=name_)
 
                 notification_message += "-newline-"
-            
-            # Get product list uploaded in sharepoint
-            product_list = self.get_product_list()
 
             # Build lookup map
-            unitPrice_mapping = product_list.groupby('barcode')['unitPrice'].first()
-            activeInWeb_mapping = product_list.groupby('barcode')['ActiveInWeb'].first()
+            unitPrice_mapping = self.product_list.groupby('barcode')['unitPrice'].first()
+            activeInWeb_mapping = self.product_list.groupby('barcode')['ActiveInWeb'].first()
 
             # Lookup unit price
             client_rows_wo_samples_df.loc[:,'barcode'] = client_rows_wo_samples_df.loc[:,'barcode'].astype(str)
@@ -179,7 +178,8 @@ class StockStatusReportOps:
                 output_buffer=output_buffer
             )
 
-            self.read_update_ssr_summary(sum_per_client_sheet=sum_per_client_sheet)
+            thread = threading.Thread(target=self.read_update_ssr_summary, args=(sum_per_client_sheet, ))
+            thread.start()
 
             notification_message = f"Stock Status Report Automation now done! -newline-" + notification_message
 
@@ -394,3 +394,15 @@ class StockStatusReportOps:
             return idx_list[0]
 
         return None
+
+    def get_ssr_summary_and_product_list(self) -> Tuple[bytes, pd.DataFrame]:
+        logging.info("[StockStatusReportOps] Retrieving SSR Summary and Product List")
+
+        with ThreadPoolExecutor() as executor:
+            ssr_summary_bytes_result = executor.submit(self.get_ssr_summary_bytes)
+            product_list_result = executor.submit(self.get_product_list)
+
+            ssr_summary_bytes = ssr_summary_bytes_result.result()
+            product_list = product_list_result.result()
+
+        return ssr_summary_bytes, product_list
