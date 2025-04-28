@@ -178,7 +178,7 @@ class StockStatusReportOps:
                 output_buffer=output_buffer
             )
 
-            thread = threading.Thread(target=self.read_update_ssr_summary, args=(sum_per_client_sheet, ), daemon=True)
+            thread = threading.Thread(target=self.read_update_ssr_summary, args=(sum_per_client_sheet, ))
             thread.start()
 
             notification_message = f"Stock Status Report Automation now done! -newline-" + notification_message
