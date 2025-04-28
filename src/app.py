@@ -6,6 +6,7 @@ import json
 
 from GoogleDocsOperations import GoogleDocsOperations
 from NotionOperator import NotionOperator
+from OORSharepointProcessor import OORSharePointProcessor
 from VoiceflowOperations import VoiceflowOperations
 from ProposalScreeningOperations import ProposalScreeningOperations
 from PromptsOperations import PromptsOperations
@@ -126,6 +127,47 @@ def analyse_proposal_from_sharepoint():
         response = jsonify({"error": "Failed to initialise Stock Status Report automation. Error: {str(e)}"}) 
         response.status_code = 500
         return response
+
+@app.route("/process_oor", methods=["POST"]) # Using POST, although GET could also work if no input needed
+def process_oor_file_endpoint():
+    """
+    Flask endpoint to trigger the OOR SharePoint file processing.
+    """
+    logging.info("Received request to process OOR file from SharePoint.")
+    try:
+        # Instantiate the processor
+        # This assumes necessary environment variables (Azure creds, SharePoint paths) are set
+        processor = OORSharePointProcessor()
+
+        # Get the latest OOR file bytes
+        logging.info("Attempting to fetch the latest OOR file...")
+        file_bytes = processor.get_latest_oor_file()
+
+        if not file_bytes:
+            logging.error("No OOR file found or error fetching file.")
+            return jsonify({"error": "Could not retrieve the latest OOR file from SharePoint."}), 404
+
+        # Process the file
+        logging.info("OOR file fetched successfully. Starting processing...")
+        stats = processor.process_oor_file(file_bytes)
+
+        if stats and stats.get('success', False):
+            logging.info("OOR processing completed successfully.")
+            # You could optionally include stats or the summary file path in the response
+            summary_path = stats.get('output_files', {}).get('summary', 'N/A')
+            return jsonify({
+                "message": "OOR processing completed successfully.",
+                "summary_file": summary_path,
+                "duration_seconds": stats.get('duration')
+            }), 200
+        else:
+            logging.error("OOR processing failed.")
+            return jsonify({"error": "OOR processing failed during execution."}), 500
+
+    except Exception as e:
+        # Log the full exception details for debugging
+        logging.exception(f"An unexpected error occurred during OOR processing: {str(e)}")
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
