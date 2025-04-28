@@ -87,7 +87,7 @@ class OORSharePointProcessor:
         
         # Get required environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
-        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Inputs')
+        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Processed')
 
     def get_latest_oor_file(self):
@@ -158,7 +158,7 @@ class OORSharePointProcessor:
             # Define all excluded brands (for main sheet)
             official_brands = [
                 'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET', 
-                'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RTDS', 'RFL'
+                'JETSTAR', 'JS', 'NRM', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
             ]
             
             # 1. Extract GENERIC orders
@@ -273,34 +273,34 @@ class OORSharePointProcessor:
                             calvary_df.loc[mask, 'CHECKING NOTE'] = note_value
                             stats['taskqueue_matches'][task_value] = mask.sum()
 
-                # Process DateIssued values
-                date_issued_column = 'DateIssued'
-                if date_issued_column in calvary_df.columns:
-                    today = datetime.now().date()
+                # # Process DateIssued values
+                # date_issued_column = 'DateIssued'
+                # if date_issued_column in calvary_df.columns:
+                #     today = datetime.now().date()
 
-                    # Convert DateIssued to datetime if needed
-                    if not pd.api.types.is_datetime64_dtype(calvary_df[date_issued_column]):
-                        try:
-                            calvary_df[date_issued_column] = pd.to_datetime(calvary_df[date_issued_column])
-                        except Exception as e:
-                            self.logger.warning(f"Could not convert DateIssued to datetime: {str(e)}")
+                #     # Convert DateIssued to datetime if needed
+                #     if not pd.api.types.is_datetime64_dtype(calvary_df[date_issued_column]):
+                #         try:
+                #             calvary_df[date_issued_column] = pd.to_datetime(calvary_df[date_issued_column])
+                #         except Exception as e:
+                #             self.logger.warning(f"Could not convert DateIssued to datetime: {str(e)}")
 
-                    try:
-                        # Extract date part
-                        calvary_df['DateIssuedDate'] = calvary_df[date_issued_column].dt.date
+                #     try:
+                #         # Extract date part
+                #         calvary_df['DateIssuedDate'] = calvary_df[date_issued_column].dt.date
 
-                        # Find rows with recent dates (< 5 days old)
-                        recent_date_mask = calvary_df['DateIssuedDate'] > (today - timedelta(days=5))
+                #         # Find rows with recent dates (< 5 days old)
+                #         recent_date_mask = calvary_df['DateIssuedDate'] > (today - timedelta(days=5))
 
-                        if recent_date_mask.any():
-                            recent_count = recent_date_mask.sum()
-                            calvary_df.loc[recent_date_mask, 'CHECKING NOTE'] = '< 5 DAYS OLD'
-                            stats['date_checks']['recent'] += recent_count
+                #         if recent_date_mask.any():
+                #             recent_count = recent_date_mask.sum()
+                #             calvary_df.loc[recent_date_mask, 'CHECKING NOTE'] = '< 5 DAYS OLD'
+                #             stats['date_checks']['recent'] += recent_count
 
-                        # Drop temporary column
-                        calvary_df = calvary_df.drop('DateIssuedDate', axis=1)
-                    except Exception as e:
-                        self.logger.warning(f"Error processing dates: {str(e)}")
+                #         # Drop temporary column
+                #         calvary_df = calvary_df.drop('DateIssuedDate', axis=1)
+                #     except Exception as e:
+                #         self.logger.warning(f"Error processing dates: {str(e)}")
             
             # 6. Process main and GENERIC dataframes for customer mapping and task queue notes
             for df_name, df_to_process in [("main", main_df), ("GENERIC", generic_df)]:
@@ -347,34 +347,34 @@ class OORSharePointProcessor:
                                 else:
                                     stats['taskqueue_matches'][task_value] = mask.sum()
 
-                    # Set CHECKING NOTE based on DateIssued
-                    date_issued_column = 'DateIssued'
-                    if date_issued_column in df_to_process.columns:
-                        today = datetime.now().date()
+                    # # Set CHECKING NOTE based on DateIssued
+                    # date_issued_column = 'DateIssued'
+                    # if date_issued_column in df_to_process.columns:
+                    #     today = datetime.now().date()
 
-                        # Convert DateIssued to datetime if needed
-                        if not pd.api.types.is_datetime64_dtype(df_to_process[date_issued_column]):
-                            try:
-                                df_to_process[date_issued_column] = pd.to_datetime(df_to_process[date_issued_column])
-                            except Exception as e:
-                                self.logger.warning(f"Could not convert DateIssued to datetime: {str(e)}")
+                    #     # Convert DateIssued to datetime if needed
+                    #     if not pd.api.types.is_datetime64_dtype(df_to_process[date_issued_column]):
+                    #         try:
+                    #             df_to_process[date_issued_column] = pd.to_datetime(df_to_process[date_issued_column])
+                    #         except Exception as e:
+                    #             self.logger.warning(f"Could not convert DateIssued to datetime: {str(e)}")
 
-                        try:
-                            # Extract date part
-                            df_to_process['DateIssuedDate'] = df_to_process[date_issued_column].dt.date
+                    #     try:
+                    #         # Extract date part
+                    #         df_to_process['DateIssuedDate'] = df_to_process[date_issued_column].dt.date
 
-                            # Find rows with recent dates (< 5 days old)
-                            recent_date_mask = df_to_process['DateIssuedDate'] > (today - timedelta(days=5))
+                    #         # Find rows with recent dates (< 5 days old)
+                    #         recent_date_mask = df_to_process['DateIssuedDate'] > (today - timedelta(days=5))
 
-                            if recent_date_mask.any():
-                                recent_count = recent_date_mask.sum()
-                                df_to_process.loc[recent_date_mask, 'CHECKING NOTE'] = '< 5 DAYS OLD'
-                                stats['date_checks']['recent'] += recent_count
+                    #         if recent_date_mask.any():
+                    #             recent_count = recent_date_mask.sum()
+                    #             df_to_process.loc[recent_date_mask, 'CHECKING NOTE'] = '< 5 DAYS OLD'
+                    #             stats['date_checks']['recent'] += recent_count
 
-                            # Drop temporary column
-                            df_to_process = df_to_process.drop('DateIssuedDate', axis=1)
-                        except Exception as e:
-                            self.logger.warning(f"Error processing dates: {str(e)}")
+                    #         # Drop temporary column
+                    #         df_to_process = df_to_process.drop('DateIssuedDate', axis=1)
+                    #     except Exception as e:
+                    #         self.logger.warning(f"Error processing dates: {str(e)}")
 
                     # Update the dataframe reference
                     if df_name == "main":
