@@ -16,6 +16,7 @@ on:
         options:
           - dev
           - prd
+          - staging
 
 env:
   IMAGE: australia-southeast1-docker.pkg.dev/dina-uniform-group/dina-images/proposal-screening
@@ -54,6 +55,14 @@ jobs:
         tags: ${{env.IMAGE}}:latest, ${{env.IMAGE}}:${{ inputs.version }}
         push: true
 
+    - name: Build and Push Docker image (Staging)
+      if: inputs.environment == 'staging'
+      uses: docker/build-push-action@v2
+      with:
+        file: ./Dockerfile
+        tags: ${{env.IMAGE}}-staging:latest, ${{env.IMAGE}}-staging:${{ inputs.version }}
+        push: true
+
     - name: Build and Push Docker image (Dev)
       if: inputs.environment == 'dev'
       uses: docker/build-push-action@v2
@@ -88,6 +97,22 @@ jobs:
           --region australia-southeast1 \
           --memory '8Gi' \
           --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest,CLIENT_ID=azure-client-id:latest,TENANT_ID=azure-tenant-id:latest,CLIENT_SECRET=azure-client-secret:latest,TENANT_NAME=azure-tenant-name:latest,SITE_NAME=azure-site-name:latest,SSR_INPUT_PATH=ssr-input-path:latest,SSR_OUTPUT_PATH=ssr-output-path:latest,PRODUCT_LIST_PREFIX=ssr-product-prefix:latest,SSR_SUMMARY_PREFIX=ssr-summary-prefix:latest \
+          --cpu 2.0 \
+          --allow-unauthenticated \
+          --timeout 3600
+
+    - name: Deploy Flask app to Cloud run (Staging)
+      if: inputs.environment == 'staging'
+      run: |
+        gcloud run deploy \
+          dina-uniforms-proposal-screening-staging \
+          --image ${{env.IMAGE}}-staging:${{ inputs.version }} \
+          --platform managed \
+          --service-account automations@dina-uniform-group.iam.gserviceaccount.com \
+          --project dina-uniform-group \
+          --region australia-southeast1 \
+          --memory '8Gi' \
+          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest \
           --cpu 2.0 \
           --allow-unauthenticated \
           --timeout 3600
