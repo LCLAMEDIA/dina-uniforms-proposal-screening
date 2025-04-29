@@ -128,46 +128,81 @@ def analyse_proposal_from_sharepoint():
         response.status_code = 500
         return response
 
-@app.route("/process_oor", methods=["POST"]) # Using POST, although GET could also work if no input needed
+@app.route("/sharepoint/process_oor", methods=["POST"])
 def process_oor_file_endpoint():
     """
     Flask endpoint to trigger the OOR SharePoint file processing.
     """
-    logging.info("Received request to process OOR file from SharePoint.")
+    excel_file_bytes, oor_filename, mimetype = None, None, None
     try:
+        file_name = request.headers.get('x-ms-file-name')
+        oor_folder = request.headers.get('x-ms-file-path')
+        content_type = request.headers.get('Content-Type')
+
+        logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
+
+        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            response = jsonify({"error": f"Invalid content type for file {file_name} when uploaded in {oor_folder}"})
+            response.status_code = 422
+            return response
+        
+        if not file_name:
+            response = jsonify({'message': f"No selected file from folder: {oor_folder}"})
+            response.status_code = 422
+            return response
+        
+        file_content = request.get_data()
+        
         # Instantiate the processor
-        # This assumes necessary environment variables (Azure creds, SharePoint paths) are set
         processor = OORSharePointProcessor()
+        
+        logging.info(f"Attempting to process OOR file: {file_name} in directory: {oor_folder}")
+        
+        # Process the file directly using the uploaded content
+        stats = processor.process_oor_file(file_content)
+        
+        if not stats or not stats.get('success', False):
+            logging.warning("OOR processing unsuccessful")
+            response = jsonify({'message': "OOR processing unsuccessful"})
+            response.status_code = 500
+            return response
 
-        # Get the latest OOR file bytes
-        logging.info("Attempting to fetch the latest OOR file...")
-        file_bytes = processor.get_latest_oor_file()
-
-        if not file_bytes:
-            logging.error("No OOR file found or error fetching file.")
-            return jsonify({"error": "Could not retrieve the latest OOR file from SharePoint."}), 404
-
-        # Process the file
-        logging.info("OOR file fetched successfully. Starting processing...")
-        stats = processor.process_oor_file(file_bytes)
-
-        if stats and stats.get('success', False):
-            logging.info("OOR processing completed successfully.")
-            # You could optionally include stats or the summary file path in the response
-            summary_path = stats.get('output_files', {}).get('summary', 'N/A')
+        # Get the summary file to return
+        summary_path = stats.get('output_files', {}).get('summary', 'N/A')
+        notification_message = f"OOR processing completed successfully in {stats.get('duration')} seconds"
+        
+        # Check if we have a summary file to return
+        if os.path.exists(summary_path):
+            with open(summary_path, 'rb') as f:
+                excel_file_bytes = f.read()
+                oor_filename = os.path.basename(summary_path)
+                mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else:
+            # Create a JSON response if no file to return
             return jsonify({
                 "message": "OOR processing completed successfully.",
                 "summary_file": summary_path,
                 "duration_seconds": stats.get('duration')
             }), 200
-        else:
-            logging.error("OOR processing failed.")
-            return jsonify({"error": "OOR processing failed during execution."}), 500
 
+        logging.info(f"Process for file: {file_name} of type: {content_type} is success!")
+        return Response(
+            excel_file_bytes,
+            mimetype=mimetype,
+            headers={
+                "Content-Disposition": f"attachment; filename={oor_filename}",
+                "x-ms-file-name": oor_filename,
+                "x-ms-notification": notification_message
+            }
+        )
+    
     except Exception as e:
-        # Log the full exception details for debugging
-        logging.exception(f"An unexpected error occurred during OOR processing: {str(e)}")
-        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+        import traceback
+        logging.error(f"Printing Traceback: {traceback.print_exc()}")
+        logging.error(f"Failed to process OOR file. Error: {str(e)}")
+        response = jsonify({"error": f"Failed to process OOR file. Error: {str(e)}"}) 
+        response.status_code = 500
+        return response
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
