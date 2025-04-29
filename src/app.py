@@ -61,8 +61,8 @@ def analyse_proposal():
         logging.error(f"Error in analyse_proposal: {str(e)}")
         return jsonify({"error": "Failed to initiate proposal analysis"}), 500
 
-@app.route("/sharepoint/ssr/automate", methods=["POST"])
-def analyse_proposal_from_sharepoint():
+@app.route("/stock-status-report/automate", methods=["POST"])
+def stock_status_report_automation():
     excel_file_bytes, ssr_filename, mimetype = None, None, None
     try:
 
