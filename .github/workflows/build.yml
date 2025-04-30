@@ -96,7 +96,7 @@ jobs:
           --project dina-uniform-group \
           --region australia-southeast1 \
           --memory '8Gi' \
-          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest,CLIENT_ID=azure-client-id:latest,TENANT_ID=azure-tenant-id:latest,CLIENT_SECRET=azure-client-secret:latest,TENANT_NAME=azure-tenant-name:latest,SITE_NAME=azure-site-name:latest,SSR_INPUT_PATH=ssr-input-path:latest,SSR_OUTPUT_PATH=ssr-output-path:latest,PRODUCT_LIST_PREFIX=ssr-product-prefix:latest,SSR_SUMMARY_PREFIX=ssr-summary-prefix:latest \
+          --set-secrets=DISCORD_AUTH=discord-auth-lcla:latest,NOTION_KEY=notion-key:latest,OPENAI_KEY=dina-lcla-openai-key:latest,POSTGRES_PASSWORD=postgres-automations-password:latest,CLIENT_ID=azure-client-id:latest,TENANT_ID=azure-tenant-id:latest,CLIENT_SECRET=azure-client-secret:latest,TENANT_NAME=azure-tenant-name:latest,SITE_NAME=azure-site-name:latest,SSR_INPUT_PATH=ssr-input-path:latest,SSR_OUTPUT_PATH=ssr-output-path:latest,PRODUCT_LIST_PREFIX=ssr-product-prefix:latest,SSR_SUMMARY_PREFIX=ssr-summary-prefix:latest,OOR_INPUT_PREFIX=oor-input-prefix:latest,OOR_INPUT_PATH=oor-input-path:latest,OOR_OUTPUT_PATH=oor-output-path:latest \
           --cpu 2.0 \
           --allow-unauthenticated \
           --timeout 3600
