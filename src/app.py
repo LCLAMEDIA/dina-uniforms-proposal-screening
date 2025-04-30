@@ -4,8 +4,11 @@ import os
 from datetime import datetime, timedelta, timezone
 import json
 
+from AzureOperations import AzureOperations
 from GoogleDocsOperations import GoogleDocsOperations
 from NotionOperator import NotionOperator
+from OpenOrdersReporting import OpenOrdersReporting
+from SharePointOperations import SharePointOperations
 from VoiceflowOperations import VoiceflowOperations
 from ProposalScreeningOperations import ProposalScreeningOperations
 from PromptsOperations import PromptsOperations
@@ -126,6 +129,93 @@ def stock_status_report_automation():
         response = jsonify({"error": "Failed to initialise Stock Status Report automation. Error: {str(e)}"}) 
         response.status_code = 500
         return response
+
+# New endpoint for processing Open Order Reports
+@app.route("/open-orders-report/process", methods=["POST"])
+def process_open_orders_report():
+    try:
+        file_name = request.headers.get('x-ms-file-name')
+        file_path = request.headers.get('x-ms-file-path')
+        content_type = request.headers.get('Content-Type')
+
+        logging.info(f"Attempting to process Open Orders Report: {file_name} from {file_path}")
+
+        # Validate content type
+        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            response = jsonify({"error": f"Invalid content type for file {file_name}. Excel file required."})
+            response.status_code = 422
+            return response
+        
+        # Validate file name
+        if not file_name:
+            response = jsonify({'message': f"No selected file from path: {file_path}"})
+            response.status_code = 422
+            return response
+        
+        # Get file content
+        file_content = request.get_data()
+        
+        # Initialize and run the Open Orders Report processor
+        oor_ops = OpenOrdersReporting()
+        result = oor_ops.process_excel_file(
+            excel_file_bytes=file_content,
+            filename=file_name
+        )
+        
+        # Return success response with processing statistics
+        response_data = {
+            "message": "Open Orders Report processing completed successfully",
+            "statistics": {
+                "total_rows_processed": result['total_rows'],
+                "generic_rows": result['generic_rows'],
+                "calvary_rows": result['calvary_rows'],
+                "former_customers_rows": result['filtered_brand_rows'],
+                "other_rows": result['remaining_rows'],
+                "output_files": list(result['output_files'].values()),
+                "processing_time_seconds": result['duration']
+            }
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Open Orders Report processing failed: {traceback.format_exc()}")
+        response = jsonify({"error": f"Failed to process Open Orders Report. Error: {str(e)}"})
+        response.status_code = 500
+        return response
+
+# Simple test endpoint to confirm SharePoint connectivity
+@app.route("/open-orders-report/test-connection", methods=["GET"])
+def test_sharepoint_connection():
+    try:
+        # Initialize Azure and SharePoint connections
+        azure_ops = AzureOperations()
+        access_token = azure_ops.get_access_token()
+        
+        if not access_token:
+            return jsonify({"error": "Failed to obtain Azure access token"}), 500
+            
+        sharepoint_ops = SharePointOperations(access_token=access_token)
+        site_id = sharepoint_ops.get_site_id()
+        
+        if not site_id:
+            return jsonify({"error": "Failed to get SharePoint site ID"}), 500
+            
+        drive_id = sharepoint_ops.get_drive_id(site_id=site_id)
+        
+        if not drive_id:
+            return jsonify({"error": "Failed to get SharePoint drive ID"}), 500
+        
+        return jsonify({
+            "message": "Successfully connected to SharePoint",
+            "site_id": site_id,
+            "drive_id": drive_id
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"SharePoint connection test failed: {str(e)}")
+        return jsonify({"error": f"SharePoint connection test failed: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

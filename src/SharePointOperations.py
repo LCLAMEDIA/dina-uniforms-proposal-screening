@@ -124,3 +124,167 @@ class SharePointOperations:
             return response.content
         
         return None
+    
+    def _ensure_folder_path_exists(self, drive_id: str, folder_path: str) -> None:
+        """
+        Ensure a folder path exists in SharePoint, creating it if necessary.
+        
+        Args:
+            drive_id: The ID of the SharePoint drive
+            folder_path: The folder path to ensure exists
+        """
+        logging.info(f"[SharePointOperations] Ensuring folder path exists: {folder_path}")
+        
+        # Remove leading slash if present
+        if folder_path.startswith('/'):
+            folder_path = folder_path[1:]
+        
+        # Check if the entire path exists first
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder_path}"
+        
+        headers = {
+            'Authorization': f'Bearer {self.access_token}'
+        }
+        
+        response = requests.request("GET", url, headers=headers)
+        
+        # If the entire path exists, no need to create anything
+        if response.status_code == 200:
+            logging.info(f"[SharePointOperations] Folder path already exists: {folder_path}")
+            return
+        
+        # Split the path into segments and create the path incrementally
+        path_segments = folder_path.split('/')
+        current_path = ""
+        
+        for i, segment in enumerate(path_segments):
+            if not segment:
+                continue
+                
+            if current_path:
+                current_path = f"{current_path}/{segment}"
+            else:
+                current_path = segment
+            
+            # Skip the last segment (which is the filename)
+            if i == len(path_segments) - 1 and '.' in segment:
+                continue
+                
+            # Check if this segment exists
+            segment_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{current_path}"
+            segment_response = requests.request("GET", segment_url, headers=headers)
+            
+            # If segment doesn't exist, create it
+            if segment_response.status_code != 200:
+                # Determine parent path
+                parent_path = ""
+                if i > 0:
+                    parent_path = '/'.join(path_segments[:i])
+                
+                create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{parent_path}:/children"
+                
+                data = {
+                    "name": segment,
+                    "folder": {},
+                    "@microsoft.graph.conflictBehavior": "rename"
+                }
+                
+                create_headers = {
+                    'Authorization': f'Bearer {self.access_token}',
+                    'Content-Type': 'application/json'
+                }
+                
+                create_response = requests.request("POST", create_url, headers=create_headers, json=data)
+                
+                if create_response.status_code not in [200, 201]:
+                    logging.warning(f"[SharePointOperations] Failed to create folder {segment} at path {parent_path}. Info: <{create_response.status_code}> {create_response.text}")
+                else:
+                    logging.info(f"[SharePointOperations] Created folder {segment} at path /{parent_path}")
+
+    def upload_file_to_path(self, drive_id: str, file_path: str, file_name: str, file_bytes: bytes, content_type: str = "text/csv") -> None:
+        """
+        Upload a file to a specific path in SharePoint.
+        This method also creates the folder structure if it doesn't exist.
+        
+        Args:
+            drive_id: The ID of the SharePoint drive
+            file_path: The full path in SharePoint where the file should be uploaded
+            file_name: The name of the file
+            file_bytes: The file content as bytes
+            content_type: The MIME type of the file (default: "text/csv")
+        """
+        logging.info(f"[SharePointOperations] Uploading file {file_name} to path {file_path}")
+        
+        # Remove leading slash if present
+        if file_path.startswith('/'):
+            file_path = file_path[1:]
+        
+        # First, ensure the folder structure exists
+        folder_path = os.path.dirname(file_path)
+        if folder_path:
+            self._ensure_folder_path_exists(drive_id, folder_path)
+        
+        # Then upload the file - use the direct item upload endpoint
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{file_path}:/content"
+        
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': content_type
+        }
+        
+        response = requests.request("PUT", url, headers=headers, data=file_bytes)
+        
+        if response.status_code in [200, 201]:
+            logging.info(f"[SharePointOperations] File {file_name} uploaded successfully to {file_path}. Info: <{response.status_code}> {response.text}")
+        else:
+            logging.exception(f"[SharePointOperations] Failed to upload file {file_name} to {file_path}. Info: <{response.status_code}> {response.text}")
+
+    def _ensure_folder_path_exists(self, drive_id: str, folder_path: str) -> None:
+            """
+            Ensure a folder path exists in SharePoint, creating it if necessary.
+            
+            Args:
+                drive_id: The ID of the SharePoint drive
+                folder_path: The folder path to ensure exists
+            """
+            logging.info(f"[SharePointOperations] Ensuring folder path exists: {folder_path}")
+            
+            # Split the path into segments
+            path_segments = folder_path.strip('/').split('/')
+            current_path = ""
+            
+            # Create each folder in the path if it doesn't exist
+            for segment in path_segments:
+                if not segment:
+                    continue
+                    
+                current_path = f"{current_path}/{segment}" if current_path else segment
+                
+                # Check if folder exists
+                url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:{current_path}"
+                
+                headers = {
+                    'Authorization': f'Bearer {self.access_token}'
+                }
+                
+                response = requests.request("GET", url, headers=headers)
+                
+                # If folder doesn't exist, create it
+                if response.status_code != 200:
+                    create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:{current_path.rstrip(segment)}:/children"
+                    
+                    data = {
+                        "name": segment,
+                        "folder": {},
+                        "@microsoft.graph.conflictBehavior": "rename"
+                    }
+                    
+                    create_headers = {
+                        'Authorization': f'Bearer {self.access_token}',
+                        'Content-Type': 'application/json'
+                    }
+                    
+                    create_response = requests.request("POST", create_url, headers=create_headers, json=data)
+                    
+                    if create_response.status_code not in [200, 201]:
+                        logging.warning(f"[SharePointOperations] Failed to create folder {segment} at path {current_path.rstrip(segment)}. Info: <{create_response.status_code}> {create_response.text}")
