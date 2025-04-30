@@ -2,12 +2,13 @@ import pandas as pd
 import numpy as np
 import io
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import os
 import pytz
 from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string
 from datetime import datetime, timezone
 from dateutil.parser import parse
 
@@ -180,14 +181,8 @@ class StockStatusReportOps:
             client_rows_wo_samples_df.loc[:,'PO Cost xgst'] = client_rows_wo_samples_df.loc[:,'UNIT PRICE'] * client_rows_wo_samples_df.loc[:,'qty_PO']
             client_rows_wo_samples_df.loc[:,'On Order Cost xgst'] = client_rows_wo_samples_df.loc[:,'UNIT PRICE'] * client_rows_wo_samples_df.loc[:,'qty_SO']
 
-            output_buffer = io.BytesIO()
-            output_buffer, sum_per_client_sheet = self.build_excel_file_buffer(
-                output_buffer=output_buffer,
+            excel_file_bytes, sum_per_client_sheet, ssr_filename = self.build_excel_file_buffer(
                 cleaned_ssr_df=client_rows_wo_samples_df
-            )
-
-            excel_file_bytes, ssr_filename = self.hide_excel_fields_return_excel_bytes(
-                output_buffer=output_buffer
             )
 
             logging.info("[StockStatusReportOps] Will run read and update SSR Summary function asynchronously")
@@ -261,54 +256,70 @@ class StockStatusReportOps:
 
         return customer_config
 
-    def build_excel_file_buffer(self, output_buffer: io.BytesIO, cleaned_ssr_df: pd.DataFrame) -> Tuple[io.BytesIO, Dict]:
+    def build_excel_file_buffer(self, cleaned_ssr_df: pd.DataFrame) -> Tuple[bytes, Dict, str]:
         logging.info("[StockStatusReportOps] Building excel file buffer from dataframe")
+
+        def process_sheet(sheet_name: str, category, df: pd.DataFrame) -> Tuple[str, pd.DataFrame, Dict]:
+            category_set = {str(cat).lower() for cat in category}
+            filtered_df = df[df['item_cat1_lower'].isin(category_set)]
+            return (
+                sheet_name,
+                filtered_df,
+                {
+                    "soh_value_sum": filtered_df['SOH Value xgst'].sum(),
+                    "po_cost_sum": filtered_df['PO Cost xgst'].sum(),
+                    "so_cost_sum": filtered_df['On Order Cost xgst'].sum()
+                }
+            )
+
         sum_per_client_sheet = {}
 
-        new_row = {0: "CURRENT CUSTOMERS", 1: np.nan, 2: np.nan}
-        copy_customer_config = pd.concat([pd.DataFrame([new_row]), self.copy_customer_config], ignore_index=True)
+        # Normalize item_cat1 once for efficiency
+        cleaned_ssr_df = cleaned_ssr_df.copy(deep=True)
+        cleaned_ssr_df['item_cat1_lower'] = cleaned_ssr_df['item_cat1'].astype(str).str.strip().str.lower()
 
-        with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+        # Combine new row and config
+        new_row = pd.DataFrame([["CURRENT CUSTOMERS", np.nan, np.nan]])
+        config_df = pd.concat([new_row, self.copy_customer_config], ignore_index=True)
+        sheet_config = [(row[0], row[1]) for row in config_df.itertuples(index=False, name=None)]
 
-            for index, row in copy_customer_config.iterrows():
-                sheet_name = row[0]
-                category = row[1]
+        results: List[Tuple[str, pd.DataFrame, Dict]] = []
 
-                if sheet_name.upper() != 'CURRENT CUSTOMERS':
-                    client_sheet_df = cleaned_ssr_df[cleaned_ssr_df['item_cat1'].astype(str).str.strip().astype(str).str.lower().isin({s.lower() for s in category})]
-
-                    sum_per_client_sheet[sheet_name] = {
-                        "soh_value_sum": client_sheet_df['SOH Value xgst'].sum(),
-                        "po_cost_sum": client_sheet_df['PO Cost xgst'].sum(),
-                        "so_cost_sum": client_sheet_df['On Order Cost xgst'].sum()
-                    }
+        # Threaded filtering and aggregation
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for sheet_name, category in sheet_config:
+                if str(sheet_name).upper() == 'CURRENT CUSTOMERS':
+                    results.append((sheet_name, cleaned_ssr_df, {}))
                 else:
-                    client_sheet_df = cleaned_ssr_df
-                    
-                client_sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    futures.append(executor.submit(process_sheet, sheet_name, category, cleaned_ssr_df))
+
+            for f in futures:
+                results.append(f.result())
+
+        output_buffer = io.BytesIO()
+
+        # Write to Excel (must be done serially)
+        with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:  # Consider 'xlsxwriter' for speed
+            for sheet_name, df, sums in results:
+                df.drop(columns='item_cat1_lower', errors='ignore').to_excel(writer, sheet_name=sheet_name, index=False)
+                worksheet = writer.sheets[sheet_name]
+
+                for col_letter in self.columns_to_hide:
+                    try:
+                        col_idx = column_index_from_string(col_letter) - 1  # Convert A -> 0, B -> 1, etc.
+                        worksheet.set_column(col_idx, col_idx, None, None, {'hidden': True})
+                    except Exception as e:
+                        logging.warning(f"Could not hide column {col_letter} in {sheet_name}: {e}")
+
+                if sums:
+                    sum_per_client_sheet[sheet_name] = sums
 
         output_buffer.seek(0)
 
-        return output_buffer, sum_per_client_sheet
-    
-    def hide_excel_fields_return_excel_bytes(self, output_buffer: io.BytesIO) -> Tuple[bytes, str]:
-        logging.info("[StockStatusReportOps] Converting excel buffer to excel workbook file buffer")
+        ssr_filename = f"STOCK STATUS REPORT {self.australia_now.strftime('%Y%m%d')}.xlsx"       
 
-        output_buffer.seek(0)
-        wb = load_workbook(output_buffer)
-
-        for sheet in wb.sheetnames:
-            ws = wb[sheet]
-            for col_letter in self.columns_to_hide:
-                ws.column_dimensions[col_letter].hidden = True
-
-        final_output = io.BytesIO()
-        wb.save(final_output)
-        final_output.seek(0)
-
-        ssr_filename = f"STOCK STATUS REPORT {self.australia_now.strftime('%Y%m%d')}.xlsx"        
-
-        return final_output.getvalue(), ssr_filename
+        return output_buffer.getvalue(), sum_per_client_sheet, ssr_filename
     
     def read_update_ssr_summary(self, sum_per_client_sheet: Dict):
         logging.info(f"[StockStatusReportOps] Trying to read and update SSR Summary")

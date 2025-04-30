@@ -72,9 +72,13 @@ def stock_status_report_automation():
 
         logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
 
-        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-            response = jsonify({"error": f"Invalid content type for file {file_name} when uploaded in {ssr_folder}"})
+        not_item_export_file = not file_name.upper().startswith("ITEM EXPORT ALL")
+        not_xlsx_file = not file_name.lower().endswith(".xlsx")
+
+        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or not_item_export_file or not_xlsx_file:
+            response = jsonify({"error": f"Invalid file {file_name} uploaded in {ssr_folder}"})
             response.status_code = 422
+            logging.error(f"Invalid file {file_name} uploaded in {ssr_folder}")
             return response
         
         if not file_name:
