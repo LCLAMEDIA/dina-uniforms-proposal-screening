@@ -189,7 +189,7 @@ class StockStatusReportOps:
             thread = threading.Thread(target=self.read_update_ssr_summary, args=(sum_per_client_sheet, ))
             thread.start()
 
-            notification_message = f"Stock Status Report Automation now done! -newline-" + notification_message
+            notification_message = f"Stock Status Report Automation now done! -newline- -newline-" + notification_message
 
             mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
