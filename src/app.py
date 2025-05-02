@@ -140,20 +140,22 @@ def process_open_orders_report():
 
         logging.info(f"[OOR] Received request: file={file_name}, path={file_path}, type={content_type}")
 
-        # Validate content type
-        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-            logging.warning(f"[OOR] Invalid content type: {content_type} for file={file_name}")
-            response = jsonify({"error": f"Invalid content type for file {file_name}. Excel file required."})
-            response.status_code = 422
-            return response
+        # # Validate content type
+        # if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        #     logging.warning(f"[OOR] Invalid content type: {content_type} for file={file_name}")
+        #     response = jsonify({"error": f"Invalid content type for file {file_name}. Excel file required."})
+        #     response.status_code = 422
+        #     return response
         
-        # Validate file name
-        if not file_name:
-            logging.warning(f"[OOR] No file name provided for path={file_path}")
-            response = jsonify({'message': f"No selected file from path: {file_path}"})
-            response.status_code = 422
-            return response
+        # # Validate file name
+        # if not file_name:
+        #     logging.warning(f"[OOR] No file name provided for path={file_path}")
+        #     response = jsonify({'message': f"No selected file from path: {file_path}"})
+        #     response.status_code = 422
+        #     return response
         
+        logging.info(f"Request headers: {dict(request.headers)}")
+
         # Get file content
         file_content = request.get_data()
         logging.info(f"[OOR] Received {len(file_content)} bytes for file={file_name}")
