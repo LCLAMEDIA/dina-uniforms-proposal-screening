@@ -138,25 +138,29 @@ def process_open_orders_report():
         file_path = request.headers.get('x-ms-file-path')
         content_type = request.headers.get('Content-Type')
 
-        logging.info(f"Attempting to process Open Orders Report: {file_name} from {file_path}")
+        logging.info(f"[OOR] Received request: file={file_name}, path={file_path}, type={content_type}")
 
         # Validate content type
         if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            logging.warning(f"[OOR] Invalid content type: {content_type} for file={file_name}")
             response = jsonify({"error": f"Invalid content type for file {file_name}. Excel file required."})
             response.status_code = 422
             return response
         
         # Validate file name
         if not file_name:
+            logging.warning(f"[OOR] No file name provided for path={file_path}")
             response = jsonify({'message': f"No selected file from path: {file_path}"})
             response.status_code = 422
             return response
         
         # Get file content
         file_content = request.get_data()
+        logging.info(f"[OOR] Received {len(file_content)} bytes for file={file_name}")
         
         # Initialize and run the Open Orders Report processor
         oor_ops = OpenOrdersReporting()
+        logging.info(f"[OOR] Starting processing for file={file_name}")
         result = oor_ops.process_excel_file(
             excel_file_bytes=file_content,
             filename=file_name
@@ -176,13 +180,20 @@ def process_open_orders_report():
             }
         }
         
-        return jsonify(response_data), 200
+        logging.info(f"[OOR] Processing successful: {result['total_rows']} rows processed in {result['duration']:.2f}s")
+        logging.info(f"[OOR] Files generated: {', '.join(list(result['output_files'].values()))}")
+        response = jsonify(response_data)
+        logging.info(f"[OOR] Sending response: status=200, data={response_data}")
+        return response, 200
         
     except Exception as e:
         import traceback
-        logging.error(f"Open Orders Report processing failed: {traceback.format_exc()}")
+        error_trace = traceback.format_exc()
+        logging.error(f"[OOR] Processing failed with exception: {str(e)}")
+        logging.error(f"[OOR] Traceback: {error_trace}")
         response = jsonify({"error": f"Failed to process Open Orders Report. Error: {str(e)}"})
         response.status_code = 500
+        logging.error(f"[OOR] Sending error response: status=500")
         return response
 
 # Simple test endpoint to confirm SharePoint connectivity
