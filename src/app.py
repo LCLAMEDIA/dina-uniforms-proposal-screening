@@ -203,13 +203,24 @@ def sharepoint_process_oor():
     try:
         # Get headers
         file_name = request.headers.get('x-ms-file-name')
-        file_path = request.headers.get('x-ms-file-path') 
+        file_path = request.headers.get('x-ms-file-path')
+        content_type = request.headers.get('Content-Type')
         
         # Get binary data directly
         file_content = request.get_data()
         
         # Log info about the received content
         logging.info(f"[OOR] Process_oor received content: {len(file_content)} bytes")
+        logging.info(f"[OOR] Content type header: {content_type}")
+        
+        # Debug first bytes if file is not empty
+        if file_content and len(file_content) > 0:
+            logging.info(f"[OOR] First 20 bytes (hex): {file_content[:20].hex()}")
+            # Excel files start with PK (hex: 504B)
+            if file_content[:2] != b'PK':
+                logging.warning("[OOR] File does not have Excel/ZIP signature (PK)")
+        else:
+            return jsonify({"error": "Received empty file or no file content"}), 400
         
         # Initialize processor
         oor_ops = OpenOrdersReporting()
@@ -222,7 +233,10 @@ def sharepoint_process_oor():
         return jsonify({"success": True, "stats": result}), 200
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         logging.error(f"SharePoint OOR processing failed: {str(e)}")
+        logging.error(f"Traceback: {error_trace}")
         return jsonify({"error": f"Failed to process: {str(e)}"}), 500
 
 
