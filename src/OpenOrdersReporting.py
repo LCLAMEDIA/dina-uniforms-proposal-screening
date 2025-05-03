@@ -56,7 +56,15 @@ class OpenOrdersReporting:
         Process an Excel file containing an Open Order Report.
         Returns statistics about the processing and uploads files to SharePoint.
         """
+        
         logging.info(f"[OpenOrdersReporting] Processing file: {filename}")
+        logging.info(f"[OpenOrdersReporting] Received data type: {type(excel_file_bytes)}")
+        logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
+        
+        
+        if len(excel_file_bytes) > 4:
+            logging.info(f"[OpenOrdersReporting] First 4 bytes (hex): {excel_file_bytes[:4].hex()}")
+   
         
         # Statistics tracking
         stats = {
@@ -73,8 +81,11 @@ class OpenOrdersReporting:
         try:
             # Read the Excel file from bytes
             excel_file = io.BytesIO(excel_file_bytes)
+            logging.info(f"[OpenOrdersReporting] Created BytesIO object, attempting to read with pandas")
             df = pd.read_excel(excel_file, engine='openpyxl')
             stats['total_rows'] = len(df)
+            logging.info(f"[OpenOrdersReporting] Successfully read Excel file with {len(df)} rows")
+        
             
             # Prepare DataFrames for separation
             generic_df = pd.DataFrame()
