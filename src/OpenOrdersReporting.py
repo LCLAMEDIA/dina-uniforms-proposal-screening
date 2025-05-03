@@ -73,7 +73,7 @@ class OpenOrdersReporting:
         try:
             # Read the Excel file from bytes
             excel_file = io.BytesIO(excel_file_bytes)
-            df = pd.read_excel(excel_file)
+            df = pd.read_excel(excel_file, engine='openpyxl')
             stats['total_rows'] = len(df)
             
             # Prepare DataFrames for separation
