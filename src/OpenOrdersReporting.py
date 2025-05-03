@@ -61,10 +61,8 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] Received data type: {type(excel_file_bytes)}")
         logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
         
-        
-        if len(excel_file_bytes) > 4:
-            logging.info(f"[OpenOrdersReporting] First 4 bytes (hex): {excel_file_bytes[:4].hex()}")
-   
+        if len(excel_file_bytes) > 10:
+              logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")   
         
         # Statistics tracking
         stats = {
