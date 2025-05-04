@@ -42,7 +42,9 @@ class OpenOrdersReporting:
             'STAR': 'STAR AVIATION', 'YAE': 'YOUNG ACADEMICS', 'ZAM': 'ZAMBARERO',
             'STG': 'DRAGONS', 'KGT': 'KNIGHTS', 'SEL-SEASON': 'SEASON LIVING',
             'SGL': 'ST GEORGE LEAGUES', 'RRA': 'REGAL REXNORD', 'CRAIG SMITH': 'CRAIG SMITH',
-            'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE'
+            'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE',
+            'BUS': 'BUSWAYS',     # Updated mapping
+            'COA': 'Coal Services' # Updated mapping
         }
         
         self.taskqueue_mapping = {
@@ -262,6 +264,7 @@ class OpenOrdersReporting:
         
         product_num_column = 'ProductNum'
         taskqueue_column = 'TaskQueue'
+        date_issued_column = 'DateIssued'
         
         # --- Customer Name Population ---
         if df_name == "CALVARY":
@@ -274,7 +277,7 @@ class OpenOrdersReporting:
                         product_num = str(product_num_val)
                         brand_prefix = product_num.split('-')[0] if '-' in product_num else product_num
                         if brand_prefix in self.official_brands:
-                            df_to_process.at[index, 'CUSTOMER'] = brand_prefix
+                            df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping.get(brand_prefix, brand_prefix)
         elif product_num_column in df_to_process.columns:  # For OTHERS and GENERIC
             for index, row in df_to_process.iterrows():
                 product_num_val = row.get(product_num_column)
@@ -299,5 +302,36 @@ class OpenOrdersReporting:
                 if mask.any():
                     # Apply note based on TaskQueue match
                     df_to_process.loc[mask, 'CHECKING NOTE'] = note_value
+        
+        # --- Add < 5 DAYS OLD checking note based on DateIssued ---
+        if date_issued_column in df_to_process.columns:
+            today = datetime.now().date()
+            
+            for index, row in df_to_process.iterrows():
+                date_issued_val = row.get(date_issued_column)
+                
+                if pd.notna(date_issued_val):
+                    try:
+                        # Parse the date in DD/MM/YYYY format
+                        if isinstance(date_issued_val, str):
+                            date_issued = datetime.strptime(date_issued_val, "%d/%m/%Y").date()
+                        else:
+                            # If it's already a datetime or timestamp
+                            date_issued = date_issued_val.date() if hasattr(date_issued_val, 'date') else date_issued_val
+                        
+                        # Calculate days difference
+                        days_diff = (today - date_issued).days
+                        
+                        # Apply the checking note if less than 5 days old
+                        if days_diff < 5:
+                            current_note = row.get('CHECKING NOTE', '')
+                            if current_note:
+                                df_to_process.at[index, 'CHECKING NOTE'] = f"{current_note} < 5 DAYS OLD"
+                            else:
+                                df_to_process.at[index, 'CHECKING NOTE'] = "< 5 DAYS OLD"
+                    
+                    except (ValueError, TypeError) as e:
+                        # Log but don't raise exception for date parsing errors
+                        logging.warning(f"[OpenOrdersReporting] Error parsing date '{date_issued_val}': {str(e)}")
         
         return df_to_process
