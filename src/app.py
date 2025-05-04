@@ -130,74 +130,6 @@ def stock_status_report_automation():
         response.status_code = 500
         return response
 
-# # New endpoint for processing Open Order Reports
-# @app.route("/open-orders-report/process", methods=["POST"])
-# def process_open_orders_report():
-#     try:
-#         file_name = request.headers.get('x-ms-file-name')
-#         file_path = request.headers.get('x-ms-file-path')
-#         content_type = request.headers.get('Content-Type')
-
-#         logging.info(f"[OOR] Received request: file={file_name}, path={file_path}, type={content_type}")
-
-#         # # Validate content type
-#         # if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-#         #     logging.warning(f"[OOR] Invalid content type: {content_type} for file={file_name}")
-#         #     response = jsonify({"error": f"Invalid content type for file {file_name}. Excel file required."})
-#         #     response.status_code = 422
-#         #     return response
-        
-#         # # Validate file name
-#         # if not file_name:
-#         #     logging.warning(f"[OOR] No file name provided for path={file_path}")
-#         #     response = jsonify({'message': f"No selected file from path: {file_path}"})
-#         #     response.status_code = 422
-#         #     return response
-        
-#         logging.info(f"Request headers: {dict(request.headers)}")
-
-#         # Get file content
-#         file_content = request.get_data()
-#         logging.info(f"[OOR] Received {len(file_content)} bytes for file={file_name}")
-        
-#         # Initialize and run the Open Orders Report processor
-#         oor_ops = OpenOrdersReporting()
-#         logging.info(f"[OOR] Starting processing for file={file_name}")
-#         result = oor_ops.process_excel_file(
-#             excel_file_bytes=file_content,
-#             filename=file_name
-#         )
-        
-#         # Return success response with processing statistics
-#         response_data = {
-#             "message": "Open Orders Report processing completed successfully",
-#             "statistics": {
-#                 "total_rows_processed": result['total_rows'],
-#                 "generic_rows": result['generic_rows'],
-#                 "calvary_rows": result['calvary_rows'],
-#                 "former_customers_rows": result['filtered_brand_rows'],
-#                 "other_rows": result['remaining_rows'],
-#                 "output_files": list(result['output_files'].values()),
-#                 "processing_time_seconds": result['duration']
-#             }
-#         }
-        
-#         logging.info(f"[OOR] Processing successful: {result['total_rows']} rows processed in {result['duration']:.2f}s")
-#         logging.info(f"[OOR] Files generated: {', '.join(list(result['output_files'].values()))}")
-#         response = jsonify(response_data)
-#         logging.info(f"[OOR] Sending response: status=200, data={response_data}")
-#         return response, 200
-        
-#     except Exception as e:
-#         import traceback
-#         error_trace = traceback.format_exc()
-#         logging.error(f"[OOR] Processing failed with exception: {str(e)}")
-#         logging.error(f"[OOR] Traceback: {error_trace}")
-#         response = jsonify({"error": f"Failed to process Open Orders Report. Error: {str(e)}"})
-#         response.status_code = 500
-#         logging.error(f"[OOR] Sending error response: status=500")
-#         return response
-
 @app.route("/open-orders-report/process", methods=["POST"])
 def sharepoint_process_oor():
     try:
@@ -229,16 +161,94 @@ def sharepoint_process_oor():
             filename=file_name
         )
         
-        # Return success
-        return jsonify({"success": True, "stats": result}), 200
+        # Format today's date for display
+        today_fmt = datetime.now().strftime("%d-%m-%Y")
+        folder_fmt = datetime.now().strftime("%d-%m-%y")
+        
+        # Build output files section
+        output_files_list = []
+        output_files_text = ""
+        
+        for file_type, filename in result.get('output_files', {}).items():
+            file_count = 0
+            if file_type == 'generic' and result.get('generic_rows'):
+                file_count = result.get('generic_rows')
+            elif file_type == 'calvary' and result.get('calvary_rows'):
+                file_count = result.get('calvary_rows')
+            elif file_type == 'former_customers' and result.get('filtered_brand_rows'):
+                file_count = result.get('filtered_brand_rows')
+            elif file_type == 'others' and result.get('remaining_rows'):
+                file_count = result.get('remaining_rows')
+            
+            file_info = {
+                "file_type": file_type.capitalize(),
+                "filename": filename,
+                "record_count": file_count
+            }
+            output_files_list.append(file_info)
+            output_files_text += f"- {file_type.capitalize()}: {filename} ({file_count} records)\n"
+        
+        # Create raw text message
+        raw_message = f"""
+Open Orders Report Processing Complete
+Source File: {file_name}
+Processed On: {today_fmt}
+Processing Time: {round(result.get('duration', 0), 2)} seconds
+Total Records: {result.get('total_rows', 0)}
+
+Generated Files:
+{output_files_text}
+Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/
+"""
+        
+        # Create structured response with both raw text and object data
+        response_data = {
+            "success": True,
+            "raw_message": raw_message.strip(),
+            "data": {
+                "source_file": file_name,
+                "processed_date": today_fmt,
+                "processing_time_seconds": round(result.get('duration', 0), 2),
+                "total_records": result.get('total_rows', 0),
+                "output_location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/",
+                "counts": {
+                    "generic": result.get('generic_rows', 0),
+                    "calvary": result.get('calvary_rows', 0),
+                    "former_customers": result.get('filtered_brand_rows', 0),
+                    "others": result.get('remaining_rows', 0)
+                },
+                "output_files": output_files_list
+            }
+        }
+        
+        # Return success response with both formats
+        return jsonify(response_data), 200
         
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
         logging.error(f"SharePoint OOR processing failed: {str(e)}")
         logging.error(f"Traceback: {error_trace}")
-        return jsonify({"error": f"Failed to process: {str(e)}"}), 500
+        
+        # Format error message in both formats
+        raw_error = f"""
+Open Orders Report Processing Failed
+Error: {str(e)}
+Time: {datetime.now().strftime("%d-%m-%Y %H:%M:%S")}
 
+Please contact IT support if this error persists.
+"""
+        
+        error_response = {
+            "error": True,
+            "raw_message": raw_error.strip(),
+            "data": {
+                "error_message": str(e),
+                "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            }
+        }
+        
+        return jsonify(error_response), 500
 
 # Simple test endpoint to confirm SharePoint connectivity
 @app.route("/open-orders-report/test-connection", methods=["GET"])
