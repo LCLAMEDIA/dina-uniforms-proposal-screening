@@ -35,7 +35,7 @@ class OpenOrdersReporting:
         
         self.product_num_mapping = {
             'SAK': 'SHARKS AT KARELLA', 'BW': 'Busways', 'CS': 'Coal Services',
-            'CLY': 'Calvary', 'CAL': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
+            'CAL': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
             'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
             'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
             'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
@@ -229,9 +229,21 @@ class OpenOrdersReporting:
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
+        # Make sure to reset any potential index that might have been set
+        df_to_save = df.reset_index(drop=True)
+        
+        # Create a buffer and save without index
         buffer = io.StringIO()
-        df.to_csv(buffer, index=False, quoting=csv.QUOTE_NONNUMERIC)
-        return buffer.getvalue().encode('utf-8')
+        df_to_save.to_csv(buffer, index=False, quoting=csv.QUOTE_NONNUMERIC)
+        
+        # Get the string buffer content and encode to bytes
+        csv_content = buffer.getvalue()
+        
+        # Log the first line to verify header structure
+        header_line = csv_content.split('\n')[0] if '\n' in csv_content else csv_content
+        logging.info(f"[OpenOrdersReporting] CSV header line: {header_line}")
+        
+        return csv_content.encode('utf-8')
     
     def _add_checking_customer_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add 'CHECKING NOTE' and 'CUSTOMER' columns to the dataframe."""
