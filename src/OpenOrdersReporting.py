@@ -82,7 +82,19 @@ class OpenOrdersReporting:
             # Read the Excel file from bytes
             excel_file = io.BytesIO(excel_file_bytes)
             logging.info(f"[OpenOrdersReporting] Created BytesIO object, attempting to read with pandas")
-            df = pd.read_excel(excel_file, engine='openpyxl')
+            
+            # Read Excel file without creating an index
+            df = pd.read_excel(excel_file, engine='openpyxl', index_col=None)
+            
+            # Log the column names to verify
+            logging.info(f"[OpenOrdersReporting] Excel columns: {list(df.columns)}")
+            
+            # Clean up any 'Unnamed' columns if they exist
+            unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
+            if unnamed_cols:
+                logging.info(f"[OpenOrdersReporting] Removing unnamed columns: {unnamed_cols}")
+                df = df.drop(columns=unnamed_cols)
+            
             stats['total_rows'] = len(df)
             logging.info(f"[OpenOrdersReporting] Successfully read Excel file with {len(df)} rows")
         
@@ -248,6 +260,12 @@ class OpenOrdersReporting:
     def _add_checking_customer_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add 'CHECKING NOTE' and 'CUSTOMER' columns to the dataframe."""
         modified_df = df.copy()
+        
+        # Remove any Unnamed columns that might have been created
+        unnamed_cols = [col for col in modified_df.columns if 'Unnamed' in str(col)]
+        if unnamed_cols:
+            logging.info(f"[OpenOrdersReporting] Removing unnamed columns before adding CHECKING NOTE and CUSTOMER: {unnamed_cols}")
+            modified_df = modified_df.drop(columns=unnamed_cols)
         
         # Ensure CHECKING NOTE is the first column
         if 'CHECKING NOTE' not in modified_df.columns:
