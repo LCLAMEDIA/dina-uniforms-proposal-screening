@@ -293,7 +293,7 @@ class OpenOrdersReporting:
             return df_to_process
         
         product_num_column = 'ProductNum'
-        taskqueue_column = 'TaskQueue'
+        # taskqueue_column = 'TaskQueue'  # Commented out as not needed
         date_issued_column = 'DateIssued'
         
         # --- Customer Name Population ---
@@ -325,13 +325,14 @@ class OpenOrdersReporting:
                     if not matched and product_num.startswith('SAK-'):
                         df_to_process.at[index, 'CUSTOMER'] = 'SHARKS AT KARELLA'
         
-        # --- CHECKING NOTE Population (TaskQueue ONLY) ---
-        if taskqueue_column in df_to_process.columns:
-            for task_value, note_value in self.taskqueue_mapping.items():
-                mask = df_to_process[taskqueue_column].astype(str) == str(task_value)
-                if mask.any():
-                    # Apply note based on TaskQueue match
-                    df_to_process.loc[mask, 'CHECKING NOTE'] = note_value
+        # --- CHECKING NOTE Population (TaskQueue ONLY) --- 
+        # Commented out as not needed
+        # if taskqueue_column in df_to_process.columns:
+        #     for task_value, note_value in self.taskqueue_mapping.items():
+        #         mask = df_to_process[taskqueue_column].astype(str) == str(task_value)
+        #         if mask.any():
+        #             # Apply note based on TaskQueue match
+        #             df_to_process.loc[mask, 'CHECKING NOTE'] = note_value
         
         # --- Add < 5 DAYS OLD checking note based on DateIssued ---
         if date_issued_column in df_to_process.columns:
