@@ -53,14 +53,23 @@ class OpenOrdersReporting:
             'CANCEL ORDERS 2B DEL': 'CANCEL Q'
         }
 
-    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None) -> Dict[str, Any]:
+    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = False) -> Dict[str, Any]:
         """
         Process an Excel file containing an Open Order Report.
         Returns statistics about the processing and uploads files to SharePoint.
+        
+        Parameters:
+        - excel_file_bytes: The bytes of the Excel file to process
+        - filename: The name of the input file
+        - require_full_reporting: If True, keep all data in one file except removed duplicates. 
+                                   If False, split into separate files.
+        - split_calvary: If True, split Calvary records even when doing full reporting
+                        (used during Calvary's first rollout period)
         """
         
         logging.info(f"[OpenOrdersReporting] Processing file: {filename}")
-        logging.info(f"[OpenOrdersReporting] Received data type: {type(excel_file_bytes)}")
+        logging.info(f"[OpenOrdersReporting] Full reporting required: {require_full_reporting}")
+        logging.info(f"[OpenOrdersReporting] Split Calvary: {split_calvary}")
         logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
         
         if len(excel_file_bytes) > 10:
@@ -73,6 +82,7 @@ class OpenOrdersReporting:
             'generic_rows': 0,
             'calvary_rows': 0,
             'filtered_brand_rows': 0,
+            'duplicate_orders_removed': 0,
             'remaining_rows': 0,
             'output_files': {},
             'start_time': datetime.now(),
@@ -98,36 +108,23 @@ class OpenOrdersReporting:
             stats['total_rows'] = len(df)
             logging.info(f"[OpenOrdersReporting] Successfully read Excel file with {len(df)} rows")
         
-            
-            # Prepare DataFrames for separation
-            generic_df = pd.DataFrame()
-            calvary_df = pd.DataFrame()
-            former_customers_df = pd.DataFrame()
+            # Main dataframe to process
             main_df = df.copy()
-            
             product_num_column = 'ProductNum'  # Key column for filtering
             
-            # 1. Extract GENERIC orders
-            if product_num_column in df.columns:
-                generic_exact_mask = df[product_num_column] == "GENERIC"
-                generic_sample_mask = df[product_num_column].astype(str).str.contains("GENERIC-SAMPLE", case=False, na=False)
-                generic_mask = generic_exact_mask | generic_sample_mask
-                if generic_mask.any():
-                    generic_df = df[generic_mask].copy()
-                    stats['generic_rows'] = len(generic_df)
-                    main_df = main_df[~generic_mask].copy()
-            else:
-                logging.warning(f"Column '{product_num_column}' not found, skipping GENERIC extraction")
+            # Initialize dataframes that will be used for different processing paths
+            calvary_df = pd.DataFrame()
+            former_customers_df = pd.DataFrame()
             
-            # 2. Extract CAL orders
-            if product_num_column in main_df.columns:
-                cal_mask = main_df[product_num_column].astype(str).str.startswith('CAL-', na=False)
-                if cal_mask.any():
-                    calvary_df = main_df[cal_mask].copy()
-                    stats['calvary_rows'] = len(calvary_df)
-                    main_df = main_df[~cal_mask].copy()
+            # 1. FIRST - Remove duplicates based on Order column
+            if 'Order' in main_df.columns and not main_df.empty:
+                before_count = len(main_df)
+                main_df = self._remove_order_duplicates(main_df)
+                after_count = len(main_df)
+                logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
+                stats['duplicate_orders_removed'] += (before_count - after_count)
             
-            # 3. Extract official brands (to FORMER CUSTOMERS)
+            # 2. SECOND - Remove former customers (official brands) as they don't need open order reporting
             if product_num_column in main_df.columns:
                 former_customers_mask = pd.Series(False, index=main_df.index)
                 for brand in self.official_brands:
@@ -140,22 +137,40 @@ class OpenOrdersReporting:
                     former_customers_df = main_df[former_customers_mask].copy()
                     stats['filtered_brand_rows'] = len(former_customers_df)
                     main_df = main_df[~former_customers_mask].copy()
+                    logging.info(f"[OpenOrdersReporting] Removed {len(former_customers_df)} former customer rows")
             
+            # 3. THIRD - Add standard columns to the main dataframe
+            main_df = self._add_checking_customer_columns(main_df)
+            
+            # 4. FOURTH - Handle generic sample processing without separating them
+            # - We'll note the count for statistics only
+            if product_num_column in main_df.columns:
+                generic_exact_mask = main_df[product_num_column] == "GENERIC"
+                generic_sample_mask = main_df[product_num_column].astype(str).str.contains("GENERIC-SAMPLE", case=False, na=False)
+                
+                generic_count = generic_exact_mask.sum()
+                generic_sample_count = generic_sample_mask.sum()
+                stats['generic_rows'] = generic_count + generic_sample_count
+                
+                if generic_count > 0 or generic_sample_count > 0:
+                    logging.info(f"[OpenOrdersReporting] Found {generic_count} GENERIC and {generic_sample_count} GENERIC-SAMPLE rows (kept in main dataframe)")
+            
+            # 5. FIFTH - Split Calvary if required
+            if (split_calvary or not require_full_reporting) and product_num_column in main_df.columns:
+                cal_mask = main_df[product_num_column].astype(str).str.startswith('CAL-', na=False)
+                if cal_mask.any():
+                    calvary_df = main_df[cal_mask].copy()
+                    calvary_df = self._add_checking_customer_columns(calvary_df)
+                    calvary_df = self._apply_processing(calvary_df, "CALVARY")
+                    stats['calvary_rows'] = len(calvary_df)
+                    main_df = main_df[~cal_mask].copy()
+                    logging.info(f"[OpenOrdersReporting] Separated {len(calvary_df)} Calvary rows")
+            
+            # Apply customer/checking note processing to main dataframe
+            main_df = self._apply_processing(main_df, "OTHERS")
             stats['remaining_rows'] = len(main_df)
             
-            # 4. Add standard columns to all DataFrames
-            main_df = self._add_checking_customer_columns(main_df)
-            generic_df = self._add_checking_customer_columns(generic_df)
-            calvary_df = self._add_checking_customer_columns(calvary_df)
-            former_customers_df = self._add_checking_customer_columns(former_customers_df)
-            
-            # 5. Apply processing to each DataFrame
-            calvary_df = self._apply_processing(calvary_df, "CALVARY")
-            main_df = self._apply_processing(main_df, "OTHERS")
-            generic_df = self._apply_processing(generic_df, "GENERIC")
-            former_customers_df = self._apply_processing(former_customers_df, "FORMER CUSTOMERS")
-            
-            # 6. Save and upload CSV files
+            # Save and upload CSV files
             today_filename_fmt = datetime.now().strftime("%Y%m%d")
             today_folder_fmt = datetime.now().strftime("%d-%m-%y")
             
@@ -167,7 +182,12 @@ class OpenOrdersReporting:
             
             # Upload each file to SharePoint
             if not main_df.empty:
-                others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
+                # Name differs based on whether this is a full report or split files
+                if require_full_reporting:
+                    others_filename = f"OOR {today_filename_fmt}.csv"
+                else:
+                    others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
+                    
                 others_path = f"{processed_date_dir}/{others_filename}"
                 others_bytes = self._dataframe_to_csv_bytes(main_df)
                 
@@ -179,23 +199,9 @@ class OpenOrdersReporting:
                     file_bytes=others_bytes,
                     content_type="text/csv"
                 )
-                stats['output_files']['others'] = others_filename
+                stats['output_files']['main'] = others_filename
             
-            if not generic_df.empty:
-                generic_filename = f"GENERIC SAMPLES {today_filename_fmt}.csv"
-                generic_path = f"{processed_date_dir}/{generic_filename}"
-                generic_bytes = self._dataframe_to_csv_bytes(generic_df)
-                
-                # Upload to SharePoint
-                self.sharepoint_ops.upload_file_to_path(
-                    drive_id=drive_id,
-                    file_path=generic_path,
-                    file_name=generic_filename,
-                    file_bytes=generic_bytes,
-                    content_type="text/csv"
-                )
-                stats['output_files']['generic'] = generic_filename
-            
+            # Upload Calvary file if it was split out
             if not calvary_df.empty:
                 calvary_filename = f"CALVARY {today_filename_fmt}.csv"
                 calvary_path = f"{processed_date_dir}/{calvary_filename}"
@@ -211,20 +217,7 @@ class OpenOrdersReporting:
                 )
                 stats['output_files']['calvary'] = calvary_filename
             
-            if not former_customers_df.empty:
-                former_filename = f"FORMER CUSTOMERS {today_filename_fmt}.csv"
-                former_path = f"{processed_date_dir}/{former_filename}"
-                former_bytes = self._dataframe_to_csv_bytes(former_customers_df)
-                
-                # Upload to SharePoint
-                self.sharepoint_ops.upload_file_to_path(
-                    drive_id=drive_id,
-                    file_path=former_path,
-                    file_name=former_filename,
-                    file_bytes=former_bytes,
-                    content_type="text/csv"
-                )
-                stats['output_files']['former_customers'] = former_filename
+            # Note: Former customers data is intentionally not saved
             
             # Finalize stats
             stats['success'] = True
@@ -238,6 +231,26 @@ class OpenOrdersReporting:
         except Exception as e:
             logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}")
             raise
+    
+    def _remove_order_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove duplicate orders, keeping the first occurrence of each order"""
+        if df.empty or 'Order' not in df.columns:
+            return df
+        
+        logging.info(f"[OpenOrdersReporting] Removing duplicates based on Order column from dataframe with {len(df)} rows")
+        
+        # Get count before deduplication
+        before_count = len(df)
+        
+        # Remove duplicates based on Order column
+        df = df.drop_duplicates(subset=['Order'], keep='first')
+        
+        # Get count after deduplication
+        after_count = len(df)
+        
+        logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
+        
+        return df
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
