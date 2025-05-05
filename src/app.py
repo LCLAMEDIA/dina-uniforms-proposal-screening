@@ -171,14 +171,14 @@ def sharepoint_process_oor():
         
         for file_type, filename in result.get('output_files', {}).items():
             file_count = 0
-            if file_type == 'generic' and result.get('generic_rows'):
-                file_count = result.get('generic_rows')
-            elif file_type == 'calvary' and result.get('calvary_rows'):
-                file_count = result.get('calvary_rows')
-            elif file_type == 'former_customers' and result.get('filtered_brand_rows'):
-                file_count = result.get('filtered_brand_rows')
-            elif file_type == 'others' and result.get('remaining_rows'):
-                file_count = result.get('remaining_rows')
+            if file_type == 'generic' and 'generic_rows' in result:
+                file_count = int(result.get('generic_rows', 0))
+            elif file_type == 'calvary' and 'calvary_rows' in result:
+                file_count = int(result.get('calvary_rows', 0))
+            elif file_type == 'former_customers' and 'filtered_brand_rows' in result:
+                file_count = int(result.get('filtered_brand_rows', 0))
+            elif (file_type == 'others' or file_type == 'main') and 'remaining_rows' in result:
+                file_count = int(result.get('remaining_rows', 0))
             
             file_info = {
                 "file_type": file_type.capitalize(),
@@ -193,29 +193,30 @@ def sharepoint_process_oor():
 Open Orders Report Processing Complete
 Source File: {file_name}
 Processed On: {today_fmt}
-Processing Time: {round(result.get('duration', 0), 2)} seconds
-Total Records: {result.get('total_rows', 0)}
+Processing Time: {round(float(result.get('duration', 0)), 2)} seconds
+Total Records: {int(result.get('total_rows', 0))}
 
 Generated Files:
 {output_files_text}
 Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/
 """
         
-        # Create structured response with both raw text and object data
+        # Create structured response with both raw text and object data - convert numeric values to regular Python types
         response_data = {
             "success": True,
             "raw_message": raw_message.strip(),
             "data": {
                 "source_file": file_name,
                 "processed_date": today_fmt,
-                "processing_time_seconds": round(result.get('duration', 0), 2),
-                "total_records": result.get('total_rows', 0),
+                "processing_time_seconds": round(float(result.get('duration', 0)), 2),
+                "total_records": int(result.get('total_rows', 0)),
                 "output_location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/",
                 "counts": {
-                    "generic": result.get('generic_rows', 0),
-                    "calvary": result.get('calvary_rows', 0),
-                    "former_customers": result.get('filtered_brand_rows', 0),
-                    "others": result.get('remaining_rows', 0)
+                    "generic": int(result.get('generic_rows', 0)),
+                    "calvary": int(result.get('calvary_rows', 0)),
+                    "former_customers": int(result.get('filtered_brand_rows', 0)),
+                    "others": int(result.get('remaining_rows', 0)),
+                    "duplicate_orders_removed": int(result.get('duplicate_orders_removed', 0))
                 },
                 "output_files": output_files_list
             }
