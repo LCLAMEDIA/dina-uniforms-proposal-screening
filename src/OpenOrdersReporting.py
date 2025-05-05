@@ -117,12 +117,12 @@ class OpenOrdersReporting:
             former_customers_df = pd.DataFrame()
             
             # 1. FIRST - Remove duplicates based on Order column
-            if 'Order' in main_df.columns and not main_df.empty:
-                before_count = len(main_df)
-                main_df = self._remove_order_duplicates(main_df)
-                after_count = len(main_df)
-                logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-                stats['duplicate_orders_removed'] += (before_count - after_count)
+            # if 'Order' in main_df.columns and not main_df.empty:
+            #     before_count = len(main_df)
+            #     main_df = self._remove_order_duplicates(main_df)
+            #     after_count = len(main_df)
+            #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
+            #     stats['duplicate_orders_removed'] += (before_count - after_count)
             
             # 2. SECOND - Remove former customers (official brands) as they don't need open order reporting
             if product_num_column in main_df.columns:
@@ -232,25 +232,25 @@ class OpenOrdersReporting:
             logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}")
             raise
     
-    def _remove_order_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove duplicate orders, keeping the first occurrence of each order"""
-        if df.empty or 'Order' not in df.columns:
-            return df
-        
-        logging.info(f"[OpenOrdersReporting] Removing duplicates based on Order column from dataframe with {len(df)} rows")
-        
-        # Get count before deduplication
-        before_count = len(df)
-        
-        # Remove duplicates based on Order column
-        df = df.drop_duplicates(subset=['Order'], keep='first')
-        
-        # Get count after deduplication
-        after_count = len(df)
-        
-        logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-        
-        return df
+    # def _remove_order_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+    #     """Remove duplicate orders, keeping the first occurrence of each order"""
+    #     if df.empty or 'Order' not in df.columns:
+    #         return df
+    #     
+    #     logging.info(f"[OpenOrdersReporting] Removing duplicates based on Order column from dataframe with {len(df)} rows")
+    #     
+    #     # Get count before deduplication
+    #     before_count = len(df)
+    #     
+    #     # Remove duplicates based on Order column
+    #     df = df.drop_duplicates(subset=['Order'], keep='first')
+    #     
+    #     # Get count after deduplication
+    #     after_count = len(df)
+    #     
+    #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
+    #     
+    #     return df
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
