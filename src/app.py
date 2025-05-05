@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -10,6 +10,7 @@ from VoiceflowOperations import VoiceflowOperations
 from ProposalScreeningOperations import ProposalScreeningOperations
 from PromptsOperations import PromptsOperations
 from GPTOperations import GPTOperations
+from StockStatusReportOps import StockStatusReportOps
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +60,76 @@ def analyse_proposal():
     except Exception as e:
         logging.error(f"Error in analyse_proposal: {str(e)}")
         return jsonify({"error": "Failed to initiate proposal analysis"}), 500
+
+@app.route("/stock-status-report/automate", methods=["POST"])
+def stock_status_report_automation():
+    excel_file_bytes, ssr_filename, mimetype = None, None, None
+    try:
+
+        file_name = request.headers.get('x-ms-file-name')
+        ssr_folder = request.headers.get('x-ms-file-path')
+        content_type = request.headers.get('Content-Type')
+
+        logging.info(f"Attempting to read file: {file_name} of type: {content_type}")
+
+        not_item_export_file = not file_name.upper().startswith("ITEM EXPORT ALL")
+        not_xlsx_file = not file_name.lower().endswith(".xlsx")
+
+        if content_type != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or not_item_export_file or not_xlsx_file:
+            response = jsonify({"error": f"Invalid file {file_name} uploaded in {ssr_folder}"})
+            response.status_code = 422
+            logging.error(f"Invalid file {file_name} uploaded in {ssr_folder}")
+            return response
+        
+        if not file_name:
+            response = jsonify({'message': f"No selected file from fodler: {ssr_folder}"})
+            response.status_code = 422
+            return response
+        
+        file_content = request.get_data()
+        
+        # Run analysis synchronously
+        try:
+            ssr_ops = StockStatusReportOps(
+                exported_file_name=file_name,
+                exported_file_bytes=file_content
+            )
+            
+
+            logging.info(f"Attempting to automate stock status report: {file_name} in directory: {ssr_folder}")
+            
+            excel_file_bytes, ssr_filename, mimetype, notification_message = ssr_ops.start_automate()
+
+            if not excel_file_bytes:
+                logging.warning("Stock Status Report automation unsuccessful")
+                response = jsonify({'message': "Stock Status Report automation unsuccessful"})
+                response.status_code = 500
+                return response
+
+        except Exception as e:
+            logging.error(f"Stock Status Report automation failed. Error: {str(e)}")
+            response = jsonify({'message': f"Stock Status Report automation failed. Error: {e}"})
+            response.status_code = 500
+            return response
+        
+        logging.info(f"Analyse for file: {file_name} of type: {content_type} is success!")
+        return Response(
+            excel_file_bytes,
+            mimetype=mimetype,
+            headers={
+                "Content-Disposition": f"attachment; filename={ssr_filename}",
+                "x-ms-file-name": ssr_filename,
+                "x-ms-notification": notification_message
+                }
+        )
+    
+    except Exception as e:
+        import traceback
+        logging.error(f"Printing Traceback: {traceback.print_exc()}")
+        logging.error(f"Failed to initialise Stock Status Report automation. Error: {str(e)}")
+        response = jsonify({"error": "Failed to initialise Stock Status Report automation. Error: {str(e)}"}) 
+        response.status_code = 500
+        return response
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
