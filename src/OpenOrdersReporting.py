@@ -34,8 +34,8 @@ class OpenOrdersReporting:
         ]
         
         self.product_num_mapping = {
-            'SAK': 'SHARKS AT KARELLA', 'BW': 'Busways', 'CS': 'Coal Services',
-            'CAL': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
+            'SAK': 'SHARKS AT KARELLA', 'BW': 'BUSWAYS',
+            'CLY': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
             'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
             'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
             'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
@@ -53,7 +53,7 @@ class OpenOrdersReporting:
             'CANCEL ORDERS 2B DEL': 'CANCEL Q'
         }
 
-    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = False) -> Dict[str, Any]:
+    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = True) -> Dict[str, Any]:
         """
         Process an Excel file containing an Open Order Report.
         Returns statistics about the processing and uploads files to SharePoint.
