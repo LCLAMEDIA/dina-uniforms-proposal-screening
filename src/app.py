@@ -154,8 +154,17 @@ def sharepoint_process_oor():
         else:
             return jsonify({"error": "Received empty file or no file content"}), 400
         
-        # Initialize processor
+        # Initialize processor with configuration
         oor_ops = OpenOrdersReporting()
+        
+        # Check if configuration was loaded
+        if hasattr(oor_ops, 'config_reader'):
+            config_loaded = hasattr(oor_ops.config_reader, 'official_brands')
+            logging.info(f"[OOR] Configuration loaded: {config_loaded}")
+            if config_loaded:
+                logging.info(f"[OOR] Using {len(oor_ops.official_brands)} official brands and {len(oor_ops.product_num_mapping)} customer mappings")
+        
+        # Process the file
         result = oor_ops.process_excel_file(
             excel_file_bytes=file_content,
             filename=file_name
@@ -195,13 +204,14 @@ Source File: {file_name}
 Processed On: {today_fmt}
 Processing Time: {round(float(result.get('duration', 0)), 2)} seconds
 Total Records: {int(result.get('total_rows', 0))}
+Duplicates Removed: {int(result.get('duplicate_orders_removed', 0))}
 
 Generated Files:
 {output_files_text}
 Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/
 """
         
-        # Create structured response with both raw text and object data - convert numeric values to regular Python types
+        # Create structured response with both raw text and object data
         response_data = {
             "success": True,
             "raw_message": raw_message.strip(),
@@ -218,7 +228,8 @@ Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING 
                     "others": int(result.get('remaining_rows', 0)),
                     "duplicate_orders_removed": int(result.get('duplicate_orders_removed', 0))
                 },
-                "output_files": output_files_list
+                "output_files": output_files_list,
+                "using_configuration": hasattr(oor_ops, 'config_reader') and hasattr(oor_ops.config_reader, 'official_brands')
             }
         }
         
