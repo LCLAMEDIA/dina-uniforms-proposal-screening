@@ -203,3 +203,55 @@ class SharePointOperations:
             logging.info(f"[SharePointOperations] File {file_name} uploaded successfully to {file_path}. Info: <{response.status_code}> {response.text}")
         else:
             logging.exception(f"[SharePointOperations] Failed to upload file {file_name} to {file_path}. Info: <{response.status_code}> {response.text}")
+            
+    def list_items_in_folder(self, drive_id: str, folder_path: str):
+        """List items in a folder."""
+        try:
+            # Ensure path starts with a forward slash
+            if not folder_path.startswith('/'):
+                folder_path = f"/{folder_path}"
+                
+            # URL encode the path for API call
+            import urllib.parse
+            encoded_path = urllib.parse.quote(folder_path)
+            
+            # Build API URL for folder children
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:{encoded_path}:/children"
+            
+            headers = {
+                'Authorization': f"Bearer {self.access_token}",
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json().get('value', [])
+            else:
+                logging.error(f"[SharePointOperations] Failed to list folder: {folder_path}. Status: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logging.error(f"[SharePointOperations] Error listing folder: {str(e)}")
+            return []
+
+    def get_file_content(self, drive_id: str, item_id: str):
+        """Get file content by item ID."""
+        try:
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
+            
+            headers = {
+                'Authorization': f"Bearer {self.access_token}"
+            }
+            
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.content
+            else:
+                logging.error(f"[SharePointOperations] Failed to get file. Status: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"[SharePointOperations] Error getting file: {str(e)}")
+            return None

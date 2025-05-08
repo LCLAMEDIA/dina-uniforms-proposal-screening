@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple, Any
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
+from  ConfigurationReader import ConfigurationReader
 
 class OpenOrdersReporting:
     """
@@ -22,37 +23,23 @@ class OpenOrdersReporting:
         access_token = self.azure_ops.get_access_token()
         self.sharepoint_ops = SharePointOperations(access_token=access_token)
         
+        # Load dynamic configuration
+        self.config_reader = ConfigurationReader(sharepoint_ops=self.sharepoint_ops)
+        config_loaded = self.config_reader.load_configuration()
+        logging.info(f"[OpenOrdersReporting] Configuration loaded: {config_loaded}")
+        
+        # Get configuration values
+        self.official_brands = self.config_reader.get_official_brands()
+        self.product_num_mapping = self.config_reader.get_product_num_mapping()
+        self.taskqueue_mapping = self.config_reader.get_taskqueue_mapping()
+        self.separate_file_customers = self.config_reader.get_separate_file_customers()
+        self.dedup_customers = self.config_reader.get_dedup_customers()
+        
         # Configure folder paths based on environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
         self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
         
-        # Define brand and mapping rules from original script
-        self.official_brands = [
-            'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET',
-            'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
-        ]
-        
-        self.product_num_mapping = {
-            'SAK': 'SHARKS AT KARELLA', 'BW': 'BUSWAYS',
-            'CLY': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
-            'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
-            'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
-            'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
-            'STAR': 'STAR AVIATION', 'YAE': 'YOUNG ACADEMICS', 'ZAM': 'ZAMBARERO',
-            'STG': 'DRAGONS', 'KGT': 'KNIGHTS', 'SEL-SEASON': 'SEASON LIVING',
-            'SGL': 'ST GEORGE LEAGUES', 'RRA': 'REGAL REXNORD', 'CRAIG SMITH': 'CRAIG SMITH',
-            'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE',
-            'BUS': 'BUSWAYS',     # Updated mapping
-            'COA': 'Coal Services' # Updated mapping
-        }
-        
-        self.taskqueue_mapping = {
-            'Data Entry CHK': 'DATA ENTRY CHECK', 'CS HOLDING ORDERS': 'CS HOLD Q!',
-            'CAL ROLLOUT DATES': 'CALL ROLLOUT DATE', 'CAL DISPATCH BY LOCATION': 'CAL DISPATCH BY LOCATION Q',
-            'CANCEL ORDERS 2B DEL': 'CANCEL Q'
-        }
-
     def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = True) -> Dict[str, Any]:
         """
         Process an Excel file containing an Open Order Report.
@@ -117,12 +104,13 @@ class OpenOrdersReporting:
             former_customers_df = pd.DataFrame()
             
             # 1. FIRST - Remove duplicates based on Order column
-            # if 'Order' in main_df.columns and not main_df.empty:
-            #     before_count = len(main_df)
-            #     main_df = self._remove_order_duplicates(main_df)
-            #     after_count = len(main_df)
-            #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-            #     stats['duplicate_orders_removed'] += (before_count - after_count)
+            if 'Order' in main_df.columns and not main_df.empty and self.dedup_customers:
+                before_count = len(main_df)
+                main_df = self._remove_duplicates_by_customer(main_df)
+                after_count = len(main_df)
+                stats['duplicate_orders_removed'] = before_count - after_count
+                logging.info(f"[OpenOrdersReporting] Removed {stats['duplicate_orders_removed']} duplicate orders")
+
             
             # 2. SECOND - Remove former customers (official brands) as they don't need open order reporting
             if product_num_column in main_df.columns:
@@ -156,15 +144,30 @@ class OpenOrdersReporting:
                     logging.info(f"[OpenOrdersReporting] Found {generic_count} GENERIC and {generic_sample_count} GENERIC-SAMPLE rows (kept in main dataframe)")
             
             # 5. FIFTH - Split Calvary if required
-            if (split_calvary or not require_full_reporting) and product_num_column in main_df.columns:
-                cal_mask = main_df[product_num_column].astype(str).str.startswith('CAL-', na=False)
-                if cal_mask.any():
-                    calvary_df = main_df[cal_mask].copy()
-                    calvary_df = self._add_checking_customer_columns(calvary_df)
-                    calvary_df = self._apply_processing(calvary_df, "CALVARY")
-                    stats['calvary_rows'] = len(calvary_df)
-                    main_df = main_df[~cal_mask].copy()
-                    logging.info(f"[OpenOrdersReporting] Separated {len(calvary_df)} Calvary rows")
+            separate_customer_dfs = {}
+            for customer_code in self.separate_file_customers:
+                if product_num_column in main_df.columns:
+                    # Match both prefix and exact matches
+                    prefix_mask = main_df[product_num_column].astype(str).str.startswith(f"{customer_code}-", na=False)
+                    exact_match_mask = main_df[product_num_column].astype(str) == customer_code
+                    customer_mask = prefix_mask | exact_match_mask
+                    
+                    if customer_mask.any():
+                        # Create a copy for this customer
+                        customer_df = main_df[customer_mask].copy()
+                        customer_df = self._add_checking_customer_columns(customer_df)
+                        customer_df = self._apply_processing(customer_df, customer_code)
+                        
+                        # Store customer-specific dataframe
+                        separate_customer_dfs[customer_code] = customer_df
+                        
+                        # Update statistics for specific customers
+                        if customer_code in ['CLY', 'CAL']:
+                            stats['calvary_rows'] += len(customer_df)
+                        
+                        # Remove these rows from main dataframe
+                        main_df = main_df[~customer_mask].copy()
+                        logging.info(f"[OpenOrdersReporting] Separated {len(customer_df)} {customer_code} rows")
             
             # Apply customer/checking note processing to main dataframe
             main_df = self._apply_processing(main_df, "OTHERS")
@@ -379,3 +382,60 @@ class OpenOrdersReporting:
                         logging.warning(f"[OpenOrdersReporting] Error parsing date '{date_issued_val}': {str(e)}")
         
         return df_to_process
+    
+    def _extract_product_code(self, product_num: str) -> str:
+        """Extract the product code from a product number."""
+        if not product_num or not isinstance(product_num, str):
+            return ""
+        
+        # If there's a hyphen, get everything before it
+        if "-" in product_num:
+            return product_num.split("-")[0]
+        
+        # Otherwise return the whole string
+        return product_num
+
+    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove duplicate orders based on customer configuration."""
+        if df.empty or 'Order' not in df.columns or 'ProductNum' not in df.columns:
+            return df
+        
+        # Skip if no customers need deduplication
+        if not self.dedup_customers:
+            return df
+        
+        logging.info(f"[OpenOrdersReporting] Performing deduplication")
+        
+        # Track seen orders per customer
+        seen_orders = {}
+        rows_to_drop = []
+        
+        # Group by Order to find duplicates
+        order_groups = df.groupby('Order')
+        
+        for order_id, order_group in order_groups:
+            if len(order_group) <= 1:
+                continue  # No duplicates for this order
+            
+            # Keep track of customer codes seen for this order
+            order_customer_codes = set()
+            
+            # Process each row in this order group
+            for idx, row in order_group.iterrows():
+                product_num = row.get('ProductNum', '')
+                product_code = self._extract_product_code(str(product_num))
+                
+                # If customer needs deduplication and we've seen this customer-order combo
+                if product_code in self.dedup_customers:
+                    if product_code in order_customer_codes:
+                        rows_to_drop.append(idx)
+                    else:
+                        order_customer_codes.add(product_code)
+        
+        # Drop identified duplicate rows
+        if rows_to_drop:
+            result_df = df.drop(rows_to_drop)
+            logging.info(f"[OpenOrdersReporting] Removed {len(rows_to_drop)} duplicate orders")
+            return result_df
+        
+        return df
