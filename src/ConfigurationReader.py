@@ -104,7 +104,7 @@ class ConfigurationReader:
             return False
     
     def _parse_config_file(self, config_bytes: bytes) -> bool:
-        """Parse configuration from Excel file bytes."""
+        """Parse configuration from Excel file bytes with dynamic header detection."""
         try:
             excel_file = io.BytesIO(config_bytes)
             xls = pd.ExcelFile(excel_file)
@@ -114,33 +114,57 @@ class ConfigurationReader:
             
             # Load official brands if available
             if 'OfficialBrands' in sheets:
-                try:
-                    # First try without skipping rows to see raw content
-                    raw_brands_df = pd.read_excel(excel_file, sheet_name='OfficialBrands')
-                    logging.info(f"[ConfigurationReader] Raw OfficialBrands content (first 5 rows):\n{raw_brands_df.head().to_string()}")
-                    
-                    # Now try with skipping rows as intended
-                    brands_df = pd.read_excel(excel_file, sheet_name='OfficialBrands', skiprows=6)
-                    logging.info(f"[ConfigurationReader] OfficialBrands headers: {list(brands_df.columns)}")
+                # First read a few rows to find headers
+                header_df = pd.read_excel(excel_file, sheet_name='OfficialBrands', nrows=20)
+                
+                # Find the row index containing "BrandCode" as a header
+                header_row = None
+                for i in range(len(header_df)):
+                    row_values = header_df.iloc[i].values
+                    if 'BrandCode' in row_values:
+                        header_row = i
+                        logging.info(f"[ConfigurationReader] Found OfficialBrands header row at index {header_row}")
+                        break
+                
+                if header_row is not None:
+                    # Now read the actual data with the header row identified
+                    brands_df = pd.read_excel(
+                        excel_file, 
+                        sheet_name='OfficialBrands',
+                        header=header_row,  # Use the discovered header row
+                        skiprows=range(header_row)  # Skip all rows before header
+                    )
                     
                     if 'BrandCode' in brands_df.columns:
                         self.official_brands = brands_df['BrandCode'].dropna().tolist()
                         logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands: {self.official_brands}")
                     else:
-                        logging.warning(f"[ConfigurationReader] 'BrandCode' column not found in OfficialBrands sheet. Available columns: {list(brands_df.columns)}")
-                except Exception as e:
-                    logging.error(f"[ConfigurationReader] Error reading OfficialBrands sheet: {str(e)}")
+                        logging.warning(f"[ConfigurationReader] 'BrandCode' column not found after header detection. Available columns: {list(brands_df.columns)}")
+                else:
+                    logging.warning("[ConfigurationReader] Could not find header row with 'BrandCode' in OfficialBrands sheet")
             
             # Load customer code mapping if available
             if 'CustomerCodeMapping' in sheets:
-                try:
-                    # First try without skipping rows
-                    raw_mapping_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping')
-                    logging.info(f"[ConfigurationReader] Raw CustomerCodeMapping content (first 5 rows):\n{raw_mapping_df.head().to_string()}")
-                    
-                    # Now try with skipping rows
-                    mapping_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping', skiprows=8)
-                    logging.info(f"[ConfigurationReader] CustomerCodeMapping headers: {list(mapping_df.columns)}")
+                # First read a few rows to find headers
+                header_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping', nrows=20)
+                
+                # Find the row index containing both "Code" and "CustomerName" as headers
+                header_row = None
+                for i in range(len(header_df)):
+                    row_values = header_df.iloc[i].values
+                    if 'Code' in row_values and 'CustomerName' in row_values:
+                        header_row = i
+                        logging.info(f"[ConfigurationReader] Found CustomerCodeMapping header row at index {header_row}")
+                        break
+                
+                if header_row is not None:
+                    # Now read the actual data with the header row identified
+                    mapping_df = pd.read_excel(
+                        excel_file, 
+                        sheet_name='CustomerCodeMapping',
+                        header=header_row,  # Use the discovered header row
+                        skiprows=range(header_row)  # Skip all rows before header
+                    )
                     
                     # Reset lists for configuration
                     self.separate_file_customers = []
@@ -165,13 +189,13 @@ class ConfigurationReader:
                             if dedup_mask.any():
                                 self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
                         
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings (first 5): {dict(list(self.product_num_mapping.items())[:5])}")
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
                         logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
                         logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
                     else:
-                        logging.warning(f"[ConfigurationReader] Required columns not found in CustomerCodeMapping sheet. Available columns: {list(mapping_df.columns)}")
-                except Exception as e:
-                    logging.error(f"[ConfigurationReader] Error reading CustomerCodeMapping sheet: {str(e)}")
+                        logging.warning(f"[ConfigurationReader] Required columns not found after header detection. Available columns: {list(mapping_df.columns)}")
+                else:
+                    logging.warning("[ConfigurationReader] Could not find header row with 'Code' and 'CustomerName' in CustomerCodeMapping sheet")
             
             return True
             
