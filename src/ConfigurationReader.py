@@ -63,6 +63,8 @@ class ConfigurationReader:
             
             # Get file content by path 
             file_path = f"{self.config_path}/{self.config_filename}"
+            logging.info(f"[ConfigurationReader] Looking for config file at: {file_path}")
+            
             config_bytes = None
             
             # Try to get file content
@@ -72,13 +74,20 @@ class ConfigurationReader:
                     folder_path=self.config_path
                 )
                 
+                logging.info(f"[ConfigurationReader] Found {len(items)} items in folder")
                 for item in items:
+                    logging.info(f"[ConfigurationReader] Found item: {item.get('name')} (ID: {item.get('id')})")
                     if item.get('name') == self.config_filename:
                         item_id = item.get('id')
+                        logging.info(f"[ConfigurationReader] Found config file with ID: {item_id}")
                         config_bytes = self.sharepoint_ops.get_file_content(
                             drive_id=drive_id,
                             item_id=item_id
                         )
+                        if config_bytes:
+                            logging.info(f"[ConfigurationReader] Successfully retrieved file content: {len(config_bytes)} bytes")
+                        else:
+                            logging.warning("[ConfigurationReader] Failed to retrieve file content")
                         break
             except Exception as e:
                 logging.warning(f"[ConfigurationReader] Error listing folder: {str(e)}")
@@ -105,45 +114,64 @@ class ConfigurationReader:
             
             # Load official brands if available
             if 'OfficialBrands' in sheets:
-                brands_df = pd.read_excel(excel_file, sheet_name='OfficialBrands', skiprows=6)
-                if 'BrandCode' in brands_df.columns:
-                    self.official_brands = brands_df['BrandCode'].dropna().tolist()
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands")
-                    logging.info(f"[ConfigurationReader] Official brands: {self.official_brands}")
+                try:
+                    # First try without skipping rows to see raw content
+                    raw_brands_df = pd.read_excel(excel_file, sheet_name='OfficialBrands')
+                    logging.info(f"[ConfigurationReader] Raw OfficialBrands content (first 5 rows):\n{raw_brands_df.head().to_string()}")
+                    
+                    # Now try with skipping rows as intended
+                    brands_df = pd.read_excel(excel_file, sheet_name='OfficialBrands', skiprows=6)
+                    logging.info(f"[ConfigurationReader] OfficialBrands headers: {list(brands_df.columns)}")
+                    
+                    if 'BrandCode' in brands_df.columns:
+                        self.official_brands = brands_df['BrandCode'].dropna().tolist()
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands: {self.official_brands}")
+                    else:
+                        logging.warning(f"[ConfigurationReader] 'BrandCode' column not found in OfficialBrands sheet. Available columns: {list(brands_df.columns)}")
+                except Exception as e:
+                    logging.error(f"[ConfigurationReader] Error reading OfficialBrands sheet: {str(e)}")
             
             # Load customer code mapping if available
             if 'CustomerCodeMapping' in sheets:
-                mapping_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping', skiprows=8)
-                
-                # Reset lists for configuration
-                self.separate_file_customers = []
-                self.dedup_customers = []
-                
-                if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
-                    # Create customer name mapping
-                    self.product_num_mapping = dict(zip(
-                        mapping_df['Code'].astype(str),
-                        mapping_df['CustomerName'].astype(str)
-                    ))
+                try:
+                    # First try without skipping rows
+                    raw_mapping_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping')
+                    logging.info(f"[ConfigurationReader] Raw CustomerCodeMapping content (first 5 rows):\n{raw_mapping_df.head().to_string()}")
                     
-                    # Create separate file list if column exists
-                    if 'CreateSeparateFile' in mapping_df.columns:
-                        separate_file_mask = mapping_df['CreateSeparateFile'].astype(str).str.upper() == 'YES'
-                        if separate_file_mask.any():
-                            self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
+                    # Now try with skipping rows
+                    mapping_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping', skiprows=8)
+                    logging.info(f"[ConfigurationReader] CustomerCodeMapping headers: {list(mapping_df.columns)}")
                     
-                    # Create deduplication list if column exists
-                    if 'RemoveDuplicates' in mapping_df.columns:
-                        dedup_mask = mapping_df['RemoveDuplicates'].astype(str).str.upper() == 'YES'
-                        if dedup_mask.any():
-                            self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
+                    # Reset lists for configuration
+                    self.separate_file_customers = []
+                    self.dedup_customers = []
                     
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
-                    logging.info(f"[ConfigurationReader] Product number mapping: {self.product_num_mapping}")
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers")
-                    logging.info(f"[ConfigurationReader] Separate file customers: {self.separate_file_customers}")
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication")
-                    logging.info(f"[ConfigurationReader] Deduplication customers: {self.dedup_customers}")
+                    if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
+                        # Create customer name mapping
+                        self.product_num_mapping = dict(zip(
+                            mapping_df['Code'].astype(str),
+                            mapping_df['CustomerName'].astype(str)
+                        ))
+                        
+                        # Create separate file list if column exists
+                        if 'CreateSeparateFile' in mapping_df.columns:
+                            separate_file_mask = mapping_df['CreateSeparateFile'].astype(str).str.upper() == 'YES'
+                            if separate_file_mask.any():
+                                self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
+                        
+                        # Create deduplication list if column exists
+                        if 'RemoveDuplicates' in mapping_df.columns:
+                            dedup_mask = mapping_df['RemoveDuplicates'].astype(str).str.upper() == 'YES'
+                            if dedup_mask.any():
+                                self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
+                        
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings (first 5): {dict(list(self.product_num_mapping.items())[:5])}")
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
+                    else:
+                        logging.warning(f"[ConfigurationReader] Required columns not found in CustomerCodeMapping sheet. Available columns: {list(mapping_df.columns)}")
+                except Exception as e:
+                    logging.error(f"[ConfigurationReader] Error reading CustomerCodeMapping sheet: {str(e)}")
             
             return True
             
