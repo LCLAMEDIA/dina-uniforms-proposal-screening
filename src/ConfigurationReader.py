@@ -109,6 +109,7 @@ class ConfigurationReader:
                 if 'BrandCode' in brands_df.columns:
                     self.official_brands = brands_df['BrandCode'].dropna().tolist()
                     logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands")
+                    logging.info(f"[ConfigurationReader] Official brands: {self.official_brands}")
             
             # Load customer code mapping if available
             if 'CustomerCodeMapping' in sheets:
@@ -138,8 +139,11 @@ class ConfigurationReader:
                             self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
                     
                     logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
+                    logging.info(f"[ConfigurationReader] Product number mapping: {self.product_num_mapping}")
                     logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers")
+                    logging.info(f"[ConfigurationReader] Separate file customers: {self.separate_file_customers}")
                     logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication")
+                    logging.info(f"[ConfigurationReader] Deduplication customers: {self.dedup_customers}")
             
             return True
             

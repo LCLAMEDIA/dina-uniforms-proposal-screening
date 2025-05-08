@@ -35,10 +35,24 @@ class OpenOrdersReporting:
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
         self.dedup_customers = self.config_reader.get_dedup_customers()
         
+        # Add detailed configuration logging
+        logging.info("[OpenOrdersReporting] Loaded configuration values:")
+        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
+        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
+        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
+        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
+        
         # Configure folder paths based on environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
         self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
+        
+        # After loading configuration values
+        logging.info(f"[OpenOrdersReporting] Loaded configuration values:")
+        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
+        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
+        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
+        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
         
     def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = True) -> Dict[str, Any]:
         """
@@ -404,7 +418,7 @@ class OpenOrdersReporting:
         if not self.dedup_customers:
             return df
         
-        logging.info(f"[OpenOrdersReporting] Performing deduplication")
+        logging.info(f"[OpenOrdersReporting] Performing deduplication for customers: {self.dedup_customers}")
         
         # Track seen orders per customer
         seen_orders = {}
