@@ -7,6 +7,7 @@ class ConfigurationReader:
     """Reads configuration for Open Orders Reporting from SharePoint."""
     
     def __init__(self, sharepoint_ops=None):
+        """Initialize the configuration reader."""
         self.sharepoint_ops = sharepoint_ops
         self.config_filename = "OOR_CONFIG.xlsx"
         self.config_path = "/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)"
@@ -120,8 +121,7 @@ class ConfigurationReader:
                 # Find the row index containing "BrandCode" as a header
                 header_row = None
                 for i in range(len(header_df)):
-                    row_values = header_df.iloc[i].values
-                    if 'BrandCode' in row_values:
+                    if isinstance(header_df.iloc[i].values[0], str) and 'BrandCode' in header_df.iloc[i].values:
                         header_row = i
                         logging.info(f"[ConfigurationReader] Found OfficialBrands header row at index {header_row}")
                         break
@@ -152,7 +152,8 @@ class ConfigurationReader:
                 header_row = None
                 for i in range(len(header_df)):
                     row_values = header_df.iloc[i].values
-                    if 'Code' in row_values and 'CustomerName' in row_values:
+                    row_values_str = [str(val) for val in row_values if val is not None]
+                    if 'Code' in row_values_str and 'CustomerName' in row_values_str:
                         header_row = i
                         logging.info(f"[ConfigurationReader] Found CustomerCodeMapping header row at index {header_row}")
                         break
@@ -189,7 +190,7 @@ class ConfigurationReader:
                             if dedup_mask.any():
                                 self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
                         
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
+                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings (first 5): {dict(list(self.product_num_mapping.items())[:5])}")
                         logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
                         logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
                     else:
