@@ -31,7 +31,6 @@ class OpenOrdersReporting:
         # Get configuration values
         self.official_brands = self.config_reader.get_official_brands()
         self.product_num_mapping = self.config_reader.get_product_num_mapping()
-        self.taskqueue_mapping = self.config_reader.get_taskqueue_mapping()
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
         self.dedup_customers = self.config_reader.get_dedup_customers()
         
