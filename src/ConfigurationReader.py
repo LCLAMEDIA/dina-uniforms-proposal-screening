@@ -12,43 +12,11 @@ class ConfigurationReader:
         self.config_filename = "OOR_CONFIG.xlsx"
         self.config_path = "/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)"
         
-        # Default configurations
-        self.default_official_brands = [
-            'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET',
-            'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
-        ]
-        
-        self.default_product_num_mapping = {
-            'SAK': 'SHARKS AT KARELLA', 'BW': 'BUSWAYS',
-            'CLY': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
-            'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
-            'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
-            'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
-            'STAR': 'STAR AVIATION', 'YAE': 'YOUNG ACADEMICS', 'ZAM': 'ZAMBARERO',
-            'STG': 'DRAGONS', 'KGT': 'KNIGHTS', 'SEL-SEASON': 'SEASON LIVING',
-            'SGL': 'ST GEORGE LEAGUES', 'RRA': 'REGAL REXNORD', 'CRAIG SMITH': 'CRAIG SMITH',
-            'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE',
-            'BUS': 'BUSWAYS', 'COA': 'Coal Services'
-        }
-        
-        self.default_taskqueue_mapping = {
-            'Data Entry CHK': 'DATA ENTRY CHECK', 'CS HOLDING ORDERS': 'CS HOLD Q!',
-            'CAL ROLLOUT DATES': 'CALL ROLLOUT DATE', 'CAL DISPATCH BY LOCATION': 'CAL DISPATCH BY LOCATION Q',
-            'CANCEL ORDERS 2B DEL': 'CANCEL Q'
-        }
-        
-        # Default separate file customers
-        self.default_separate_file_customers = ['CLY', 'CAL']
-        
-        # Default customers needing deduplication
-        self.default_dedup_customers = []
-        
-        # Initialize with defaults
-        self.official_brands = self.default_official_brands.copy()
-        self.product_num_mapping = self.default_product_num_mapping.copy()
-        self.taskqueue_mapping = self.default_taskqueue_mapping.copy()
-        self.separate_file_customers = self.default_separate_file_customers.copy()
-        self.dedup_customers = self.default_dedup_customers.copy()
+        # Initialize empty configurations
+        self.official_brands = []
+        self.product_num_mapping = {}
+        self.separate_file_customers = []
+        self.dedup_customers = []
     
     def load_configuration(self) -> bool:
         """Load configuration from SharePoint Excel file."""
@@ -137,10 +105,6 @@ class ConfigurationReader:
                     skiprows=[0]  # Skip row 1 (index 0) with instructions
                 )
                 
-                # Reset lists for configuration
-                self.separate_file_customers = []
-                self.dedup_customers = []
-                
                 if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
                     # Create customer name mapping - filter out empty/NaN values
                     valid_rows = mapping_df[mapping_df['Code'].notna()]
@@ -171,12 +135,6 @@ class ConfigurationReader:
             
         except Exception as e:
             logging.error(f"[ConfigurationReader] Error parsing config file: {str(e)}")
-            # Revert to defaults
-            self.official_brands = self.default_official_brands.copy()
-            self.product_num_mapping = self.default_product_num_mapping.copy()
-            self.taskqueue_mapping = self.default_taskqueue_mapping.copy()
-            self.separate_file_customers = self.default_separate_file_customers.copy()
-            self.dedup_customers = self.default_dedup_customers.copy()
             return False
     
     def get_official_brands(self) -> List[str]:
@@ -186,10 +144,6 @@ class ConfigurationReader:
     def get_product_num_mapping(self) -> Dict[str, str]:
         """Get product number to customer name mapping."""
         return self.product_num_mapping
-    
-    def get_taskqueue_mapping(self) -> Dict[str, str]:
-        """Get task queue to checking note mapping."""
-        return self.taskqueue_mapping
     
     def get_separate_file_customers(self) -> List[str]:
         """Get list of customers that need separate files."""
