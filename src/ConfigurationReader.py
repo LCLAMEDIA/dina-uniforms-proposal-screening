@@ -105,7 +105,7 @@ class ConfigurationReader:
             return False
     
     def _parse_config_file(self, config_bytes: bytes) -> bool:
-        """Parse configuration from Excel file bytes with dynamic header detection."""
+        """Parse configuration from Excel file bytes with correct header handling."""
         try:
             excel_file = io.BytesIO(config_bytes)
             xls = pd.ExcelFile(excel_file)
@@ -113,90 +113,59 @@ class ConfigurationReader:
             
             logging.info(f"[ConfigurationReader] Found sheets: {sheets}")
             
-            # Load official brands if available
+            # Load official brands - headers in row 2 (index 1), data starts in row 3 (index 2)
             if 'OfficialBrands' in sheets:
-                # First read a few rows to find headers
-                header_df = pd.read_excel(excel_file, sheet_name='OfficialBrands', nrows=20)
+                brands_df = pd.read_excel(
+                    excel_file, 
+                    sheet_name='OfficialBrands',
+                    header=1,  # Row 2 (index 1) contains the headers
+                    skiprows=[0]  # Skip row 1 (index 0) with instructions
+                )
                 
-                # Find the row index containing "BrandCode" as a header
-                header_row = None
-                for i in range(len(header_df)):
-                    if isinstance(header_df.iloc[i].values[0], str) and 'BrandCode' in header_df.iloc[i].values:
-                        header_row = i
-                        logging.info(f"[ConfigurationReader] Found OfficialBrands header row at index {header_row}")
-                        break
-                
-                if header_row is not None:
-                    # Now read the actual data with the header row identified
-                    brands_df = pd.read_excel(
-                        excel_file, 
-                        sheet_name='OfficialBrands',
-                        header=header_row,  # Use the discovered header row
-                        skiprows=range(header_row)  # Skip all rows before header
-                    )
-                    
-                    if 'BrandCode' in brands_df.columns:
-                        self.official_brands = brands_df['BrandCode'].dropna().tolist()
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands: {self.official_brands}")
-                    else:
-                        logging.warning(f"[ConfigurationReader] 'BrandCode' column not found after header detection. Available columns: {list(brands_df.columns)}")
+                if 'BrandCode' in brands_df.columns:
+                    self.official_brands = brands_df['BrandCode'].dropna().tolist()
+                    logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands: {self.official_brands}")
                 else:
-                    logging.warning("[ConfigurationReader] Could not find header row with 'BrandCode' in OfficialBrands sheet")
+                    logging.warning(f"[ConfigurationReader] 'BrandCode' column not found. Available columns: {list(brands_df.columns)}")
             
-            # Load customer code mapping if available
+            # Load customer code mapping - headers in row 2 (index 1), data starts in row 3 (index 2)
             if 'CustomerCodeMapping' in sheets:
-                # First read a few rows to find headers
-                header_df = pd.read_excel(excel_file, sheet_name='CustomerCodeMapping', nrows=20)
+                mapping_df = pd.read_excel(
+                    excel_file, 
+                    sheet_name='CustomerCodeMapping',
+                    header=1,  # Row 2 (index 1) contains the headers
+                    skiprows=[0]  # Skip row 1 (index 0) with instructions
+                )
                 
-                # Find the row index containing both "Code" and "CustomerName" as headers
-                header_row = None
-                for i in range(len(header_df)):
-                    row_values = header_df.iloc[i].values
-                    row_values_str = [str(val) for val in row_values if val is not None]
-                    if 'Code' in row_values_str and 'CustomerName' in row_values_str:
-                        header_row = i
-                        logging.info(f"[ConfigurationReader] Found CustomerCodeMapping header row at index {header_row}")
-                        break
+                # Reset lists for configuration
+                self.separate_file_customers = []
+                self.dedup_customers = []
                 
-                if header_row is not None:
-                    # Now read the actual data with the header row identified
-                    mapping_df = pd.read_excel(
-                        excel_file, 
-                        sheet_name='CustomerCodeMapping',
-                        header=header_row,  # Use the discovered header row
-                        skiprows=range(header_row)  # Skip all rows before header
-                    )
+                if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
+                    # Create customer name mapping - filter out empty/NaN values
+                    valid_rows = mapping_df[mapping_df['Code'].notna()]
+                    self.product_num_mapping = dict(zip(
+                        valid_rows['Code'].astype(str),
+                        valid_rows['CustomerName'].astype(str)
+                    ))
                     
-                    # Reset lists for configuration
-                    self.separate_file_customers = []
-                    self.dedup_customers = []
+                    # Create separate file list if column exists
+                    if 'CreateSeparateFile' in mapping_df.columns:
+                        separate_file_mask = (mapping_df['CreateSeparateFile'].astype(str).str.upper() == 'YES') & mapping_df['Code'].notna()
+                        if separate_file_mask.any():
+                            self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
                     
-                    if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
-                        # Create customer name mapping
-                        self.product_num_mapping = dict(zip(
-                            mapping_df['Code'].astype(str),
-                            mapping_df['CustomerName'].astype(str)
-                        ))
-                        
-                        # Create separate file list if column exists
-                        if 'CreateSeparateFile' in mapping_df.columns:
-                            separate_file_mask = mapping_df['CreateSeparateFile'].astype(str).str.upper() == 'YES'
-                            if separate_file_mask.any():
-                                self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
-                        
-                        # Create deduplication list if column exists
-                        if 'RemoveDuplicates' in mapping_df.columns:
-                            dedup_mask = mapping_df['RemoveDuplicates'].astype(str).str.upper() == 'YES'
-                            if dedup_mask.any():
-                                self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
-                        
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings (first 5): {dict(list(self.product_num_mapping.items())[:5])}")
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
-                        logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
-                    else:
-                        logging.warning(f"[ConfigurationReader] Required columns not found after header detection. Available columns: {list(mapping_df.columns)}")
+                    # Create deduplication list if column exists
+                    if 'RemoveDuplicates' in mapping_df.columns:
+                        dedup_mask = (mapping_df['RemoveDuplicates'].astype(str).str.upper() == 'YES') & mapping_df['Code'].notna()
+                        if dedup_mask.any():
+                            self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
+                    
+                    logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
+                    logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
+                    logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
                 else:
-                    logging.warning("[ConfigurationReader] Could not find header row with 'Code' and 'CustomerName' in CustomerCodeMapping sheet")
+                    logging.warning(f"[ConfigurationReader] Required columns not found. Available columns: {list(mapping_df.columns)}")
             
             return True
             
