@@ -86,8 +86,8 @@ class ConfigurationReader:
                 brands_df = pd.read_excel(
                     excel_file, 
                     sheet_name='OfficialBrands',
-                    header=1,  # Row 2 (index 1) contains the headers
-                    skiprows=[0]  # Skip row 1 (index 0) with instructions
+                    header=0,  # Row 2 (index 1) contains the headers
+                    # skiprows=[0]  # Skip row 1 (index 0) with instructions
                 )
                 
                 if 'BrandCode' in brands_df.columns:
