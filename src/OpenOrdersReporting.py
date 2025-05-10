@@ -8,11 +8,12 @@ from typing import Dict, List, Tuple, Any
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
+from SharePointConfigReader import SharePointConfigReader
 
 class OpenOrdersReporting:
     """
     A class for processing Open Order Reports and saving them to SharePoint.
-    Based on the original OOR processing script with SharePoint integration.
+    Now with dynamic configuration and enhanced processing rules.
     """
 
     def __init__(self):
@@ -26,32 +27,65 @@ class OpenOrdersReporting:
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
         self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
+        self.config_prefix = os.environ.get('OOR_CONFIG_PREFIX', 'OOR_CONFIG')
         
-        # Define brand and mapping rules from original script
-        self.official_brands = [
-            'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET',
-            'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
-        ]
+        # Load configuration from SharePoint
+        self.config_reader = SharePointConfigReader(self.sharepoint_ops, self.config_prefix)
+        site_id = self.sharepoint_ops.get_site_id()
+        drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
+        config_loaded = self.config_reader.load_config(drive_id)
         
-        self.product_num_mapping = {
-            'SAK': 'SHARKS AT KARELLA', 'BW': 'Busways', 'CS': 'Coal Services',
-            'CAL': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
-            'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
-            'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
-            'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
-            'STAR': 'STAR AVIATION', 'YAE': 'YOUNG ACADEMICS', 'ZAM': 'ZAMBARERO',
-            'STG': 'DRAGONS', 'KGT': 'KNIGHTS', 'SEL-SEASON': 'SEASON LIVING',
-            'SGL': 'ST GEORGE LEAGUES', 'RRA': 'REGAL REXNORD', 'CRAIG SMITH': 'CRAIG SMITH',
-            'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE',
-            'BUS': 'BUSWAYS',     # Updated mapping
-            'COA': 'Coal Services' # Updated mapping
-        }
-        
-        self.taskqueue_mapping = {
-            'Data Entry CHK': 'DATA ENTRY CHECK', 'CS HOLDING ORDERS': 'CS HOLD Q!',
-            'CAL ROLLOUT DATES': 'CALL ROLLOUT DATE', 'CAL DISPATCH BY LOCATION': 'CAL DISPATCH BY LOCATION Q',
-            'CANCEL ORDERS 2B DEL': 'CANCEL Q'
-        }
+        # Load configurations or use defaults
+        if config_loaded:
+            self.official_brands = self.config_reader.get_official_brands()
+            self.product_num_mapping = self.config_reader.get_product_num_mapping()
+            self.taskqueue_mapping = self.config_reader.get_taskqueue_mapping()
+            self.processing_rules = self.config_reader.get_processing_rules()
+            logging.info("[OpenOrdersReporting] Configuration loaded from SharePoint")
+        else:
+            # Use default values as fallback
+            logging.warning("[OpenOrdersReporting] Using default configuration values")
+            self.official_brands = [
+                'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET',
+                'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
+            ]
+            
+            self.product_num_mapping = {
+                'SAK': 'SHARKS AT KARELLA', 'BW': 'Busways', 'CS': 'Coal Services',
+                'CAL': 'CALVARY', 'IMB': 'IMB', 'DC': 'Dolphins',
+                'SG': 'ST George', 'CCC': 'CCC', 'DNA': 'DNATA', 'DOLP': 'DOLPHINS',
+                'END': 'ESHS', 'GCL': 'GROWTH CIVIL LANDSCAPES', 'GYM': 'GYMEA TRADES',
+                'RHH': 'REDHILL', 'RPA': 'REGAL REXNORR', 'SEL': 'SEASONS LIVING',
+                'STAR': 'STAR AVIATION', 'YAE': 'YOUNG ACADEMICS', 'ZAM': 'ZAMBARERO',
+                'STG': 'DRAGONS', 'KGT': 'KNIGHTS', 'SEL-SEASON': 'SEASON LIVING',
+                'SGL': 'ST GEORGE LEAGUES', 'RRA': 'REGAL REXNORD', 'CRAIG SMITH': 'CRAIG SMITH',
+                'TRADES GOLF CLUB': 'TRADES GOLF CLUB', 'MYTILENIAN': 'HOUSE',
+                'BUS': 'BUSWAYS',
+                'COA': 'Coal Services'
+            }
+            
+            self.taskqueue_mapping = {
+                'Data Entry CHK': 'DATA ENTRY CHECK', 'CS HOLDING ORDERS': 'CS HOLD Q!',
+                'CAL ROLLOUT DATES': 'CALL ROLLOUT DATE', 'CAL DISPATCH BY LOCATION': 'CAL DISPATCH BY LOCATION Q',
+                'CANCEL ORDERS 2B DEL': 'CANCEL Q'
+            }
+            
+            # Default processing rules based on hard-coded values
+            self.processing_rules = {
+                'CAL': {
+                    'customer_name': 'CALVARY',
+                    'create_separate_file': True,
+                    'remove_duplicates': True
+                }
+            }
+            # Add default rules for other product codes
+            for code, name in self.product_num_mapping.items():
+                if code not in self.processing_rules:
+                    self.processing_rules[code] = {
+                        'customer_name': name,
+                        'create_separate_file': False,
+                        'remove_duplicates': False
+                    }
 
     def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = False) -> Dict[str, Any]:
         """
@@ -62,7 +96,7 @@ class OpenOrdersReporting:
         - excel_file_bytes: The bytes of the Excel file to process
         - filename: The name of the input file
         - require_full_reporting: If True, keep all data in one file except removed duplicates. 
-                                   If False, split into separate files.
+                                 If False, split into separate files.
         - split_calvary: If True, split Calvary records even when doing full reporting
                         (used during Calvary's first rollout period)
         """
@@ -112,19 +146,7 @@ class OpenOrdersReporting:
             main_df = df.copy()
             product_num_column = 'ProductNum'  # Key column for filtering
             
-            # Initialize dataframes that will be used for different processing paths
-            calvary_df = pd.DataFrame()
-            former_customers_df = pd.DataFrame()
-            
-            # 1. FIRST - Remove duplicates based on Order column
-            # if 'Order' in main_df.columns and not main_df.empty:
-            #     before_count = len(main_df)
-            #     main_df = self._remove_order_duplicates(main_df)
-            #     after_count = len(main_df)
-            #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-            #     stats['duplicate_orders_removed'] += (before_count - after_count)
-            
-            # 2. SECOND - Remove former customers (official brands) as they don't need open order reporting
+            # 1. FIRST - Remove former customers (official brands) as they don't need open order reporting
             if product_num_column in main_df.columns:
                 former_customers_mask = pd.Series(False, index=main_df.index)
                 for brand in self.official_brands:
@@ -139,10 +161,10 @@ class OpenOrdersReporting:
                     main_df = main_df[~former_customers_mask].copy()
                     logging.info(f"[OpenOrdersReporting] Removed {len(former_customers_df)} former customer rows")
             
-            # 3. THIRD - Add standard columns to the main dataframe
+            # 2. SECOND - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. FOURTH - Handle generic sample processing without separating them
+            # 3. THIRD - Handle generic sample processing without separating them
             # - We'll note the count for statistics only
             if product_num_column in main_df.columns:
                 generic_exact_mask = main_df[product_num_column] == "GENERIC"
@@ -155,21 +177,58 @@ class OpenOrdersReporting:
                 if generic_count > 0 or generic_sample_count > 0:
                     logging.info(f"[OpenOrdersReporting] Found {generic_count} GENERIC and {generic_sample_count} GENERIC-SAMPLE rows (kept in main dataframe)")
             
-            # 5. FIFTH - Split Calvary if required
-            if (split_calvary or not require_full_reporting) and product_num_column in main_df.columns:
-                cal_mask = main_df[product_num_column].astype(str).str.startswith('CAL-', na=False)
-                if cal_mask.any():
-                    calvary_df = main_df[cal_mask].copy()
-                    calvary_df = self._add_checking_customer_columns(calvary_df)
-                    calvary_df = self._apply_processing(calvary_df, "CALVARY")
-                    stats['calvary_rows'] = len(calvary_df)
-                    main_df = main_df[~cal_mask].copy()
-                    logging.info(f"[OpenOrdersReporting] Separated {len(calvary_df)} Calvary rows")
+            # 4. FOURTH - Process data frames based on product codes
+            # Initialize dictionary to hold separate dataframes
+            product_dataframes = {}
+            remaining_df = main_df.copy()
             
-            # Apply customer/checking note processing to main dataframe
-            main_df = self._apply_processing(main_df, "OTHERS")
-            stats['remaining_rows'] = len(main_df)
+            # Only split if not requiring full reporting or if split_calvary is True
+            if not require_full_reporting or split_calvary:
+                for product_code, rule in self.processing_rules.items():
+                    # Skip if not configured to create a separate file
+                    if not rule.get('create_separate_file', False):
+                        continue
+                        
+                    # Special case for Calvary - only process if split_calvary is True or not requiring full reporting
+                    if product_code == 'CAL' and require_full_reporting and not split_calvary:
+                        continue
+                    
+                    # Create product code mask
+                    if product_num_column in remaining_df.columns:
+                        # Match either exact code or code followed by hyphen
+                        exact_match = remaining_df[product_num_column] == product_code
+                        prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
+                        product_mask = exact_match | prefix_match
+                        
+                        if product_mask.any():
+                            # Extract matching rows to a separate dataframe
+                            product_df = remaining_df[product_mask].copy()
+                            product_df = self._add_checking_customer_columns(product_df)
+                            
+                            # Apply customer name and remove duplicates if configured
+                            product_df = self._apply_processing(
+                                product_df, 
+                                product_code, 
+                                remove_duplicates=rule.get('remove_duplicates', False)
+                            )
+                            
+                            # Add to the product dataframes dictionary
+                            product_dataframes[product_code] = product_df
+                            
+                            # Update stats if it's Calvary
+                            if product_code == 'CAL':
+                                stats['calvary_rows'] = len(product_df)
+                            
+                            # Remove from the main dataframe
+                            remaining_df = remaining_df[~product_mask].copy()
+                            logging.info(f"[OpenOrdersReporting] Separated {len(product_df)} {product_code} rows")
             
+            # 5. FIFTH - Process the remaining data
+            # Apply customer/checking note processing to remaining dataframe
+            remaining_df = self._apply_processing(remaining_df, "OTHERS")
+            stats['remaining_rows'] = len(remaining_df)
+            
+            # 6. SIXTH - Prepare for output
             # Save and upload CSV files
             today_filename_fmt = datetime.now().strftime("%Y%m%d")
             today_folder_fmt = datetime.now().strftime("%d-%m-%y")
@@ -180,16 +239,16 @@ class OpenOrdersReporting:
             site_id = self.sharepoint_ops.get_site_id()
             drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
             
-            # Upload each file to SharePoint
-            if not main_df.empty:
+            # 7. SEVENTH - Upload main file if it's not empty
+            if not remaining_df.empty:
                 # Name differs based on whether this is a full report or split files
-                if require_full_reporting:
+                if require_full_reporting and not product_dataframes:
                     others_filename = f"OOR {today_filename_fmt}.csv"
                 else:
                     others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
                     
                 others_path = f"{processed_date_dir}/{others_filename}"
-                others_bytes = self._dataframe_to_csv_bytes(main_df)
+                others_bytes = self._dataframe_to_csv_bytes(remaining_df)
                 
                 # Upload to SharePoint
                 self.sharepoint_ops.upload_file_to_path(
@@ -201,23 +260,24 @@ class OpenOrdersReporting:
                 )
                 stats['output_files']['main'] = others_filename
             
-            # Upload Calvary file if it was split out
-            if not calvary_df.empty:
-                calvary_filename = f"CALVARY {today_filename_fmt}.csv"
-                calvary_path = f"{processed_date_dir}/{calvary_filename}"
-                calvary_bytes = self._dataframe_to_csv_bytes(calvary_df)
+            # 8. EIGHTH - Upload product-specific files
+            for product_code, product_df in product_dataframes.items():
+                if product_df.empty:
+                    continue
+                    
+                product_filename = f"{self.processing_rules[product_code]['customer_name']} {today_filename_fmt}.csv"
+                product_path = f"{processed_date_dir}/{product_filename}"
+                product_bytes = self._dataframe_to_csv_bytes(product_df)
                 
                 # Upload to SharePoint
                 self.sharepoint_ops.upload_file_to_path(
                     drive_id=drive_id,
-                    file_path=calvary_path,
-                    file_name=calvary_filename,
-                    file_bytes=calvary_bytes, 
+                    file_path=product_path,
+                    file_name=product_filename,
+                    file_bytes=product_bytes, 
                     content_type="text/csv"
                 )
-                stats['output_files']['calvary'] = calvary_filename
-            
-            # Note: Former customers data is intentionally not saved
+                stats['output_files'][product_code] = product_filename
             
             # Finalize stats
             stats['success'] = True
@@ -232,25 +292,34 @@ class OpenOrdersReporting:
             logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}")
             raise
     
-    # def _remove_order_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-    #     """Remove duplicate orders, keeping the first occurrence of each order"""
-    #     if df.empty or 'Order' not in df.columns:
-    #         return df
-    #     
-    #     logging.info(f"[OpenOrdersReporting] Removing duplicates based on Order column from dataframe with {len(df)} rows")
-    #     
-    #     # Get count before deduplication
-    #     before_count = len(df)
-    #     
-    #     # Remove duplicates based on Order column
-    #     df = df.drop_duplicates(subset=['Order'], keep='first')
-    #     
-    #     # Get count after deduplication
-    #     after_count = len(df)
-    #     
-    #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-    #     
-    #     return df
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove exact duplicate rows from the DataFrame.
+        This considers all columns to determine if rows are truly duplicates.
+        
+        Args:
+            df: DataFrame to process
+            
+        Returns:
+            DataFrame with duplicates removed
+        """
+        if df.empty:
+            return df
+            
+        # Get the row count before deduplication
+        before_count = len(df)
+        
+        # Drop exact duplicates (using all columns)
+        df_deduped = df.drop_duplicates(keep='first')
+        
+        # Get row count after deduplication
+        after_count = len(df_deduped)
+        removed_count = before_count - after_count
+        
+        if removed_count > 0:
+            logging.info(f"[OpenOrdersReporting] Removed {removed_count} exact duplicate rows")
+            
+        return df_deduped
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
@@ -300,19 +369,42 @@ class OpenOrdersReporting:
         
         return modified_df
     
-    def _apply_processing(self, df_to_process: pd.DataFrame, df_name: str) -> pd.DataFrame:
-        """Applies customer name and checking note logic"""
+    def _apply_processing(self, df_to_process: pd.DataFrame, product_code: str, remove_duplicates: bool = False) -> pd.DataFrame:
+        """
+        Applies customer name, checking note logic, and optional duplicate removal.
+        
+        Args:
+            df_to_process: DataFrame to process
+            product_code: The product code to process
+            remove_duplicates: If True, removes exact duplicates from the DataFrame
+            
+        Returns:
+            Processed DataFrame
+        """
         if df_to_process.empty:
             return df_to_process
         
         product_num_column = 'ProductNum'
-        # taskqueue_column = 'TaskQueue'  # Commented out as not needed
         date_issued_column = 'DateIssued'
         
+        # First apply duplicate removal if requested
+        if remove_duplicates:
+            initial_count = len(df_to_process)
+            df_to_process = self._remove_duplicates(df_to_process)
+            removed_count = initial_count - len(df_to_process)
+            if removed_count > 0:
+                logging.info(f"[OpenOrdersReporting] Removed {removed_count} duplicates for {product_code}")
+        
         # --- Customer Name Population ---
-        if df_name == "CALVARY":
+        if product_code in self.processing_rules:
+            # For specific product codes with rules
+            rule = self.processing_rules[product_code]
+            df_to_process['CUSTOMER'] = rule['customer_name']
+        elif product_code == "CALVARY":
+            # Default Calvary handling
             df_to_process['CUSTOMER'] = 'CALVARY'
-        elif df_name == "FORMER CUSTOMERS":
+        elif product_code == "FORMER CUSTOMERS":
+            # For former customers, map based on brand prefix
             if product_num_column in df_to_process.columns:
                 for index, row in df_to_process.iterrows():
                     product_num_val = row.get(product_num_column)
@@ -337,15 +429,6 @@ class OpenOrdersReporting:
                             break
                     if not matched and product_num.startswith('SAK-'):
                         df_to_process.at[index, 'CUSTOMER'] = 'SHARKS AT KARELLA'
-        
-        # --- CHECKING NOTE Population (TaskQueue ONLY) --- 
-        # Commented out as not needed
-        # if taskqueue_column in df_to_process.columns:
-        #     for task_value, note_value in self.taskqueue_mapping.items():
-        #         mask = df_to_process[taskqueue_column].astype(str) == str(task_value)
-        #         if mask.any():
-        #             # Apply note based on TaskQueue match
-        #             df_to_process.loc[mask, 'CHECKING NOTE'] = note_value
         
         # --- Add < 5 DAYS OLD checking note based on DateIssued ---
         if date_issued_column in df_to_process.columns:
