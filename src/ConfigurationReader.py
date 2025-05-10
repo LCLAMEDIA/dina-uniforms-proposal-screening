@@ -73,7 +73,6 @@ class ConfigurationReader:
             return False
     
     def _parse_config_file(self, config_bytes: bytes) -> bool:
-        """Parse configuration from Excel file bytes with correct header handling."""
         try:
             excel_file = io.BytesIO(config_bytes)
             xls = pd.ExcelFile(excel_file)
@@ -81,55 +80,39 @@ class ConfigurationReader:
             
             logging.info(f"[ConfigurationReader] Found sheets: {sheets}")
             
-            # Initialize default configuration values
-            self.official_brands = []
-            self.product_num_mapping = {}
-            self.separate_file_customers = []
-            self.dedup_customers = []
-            
             # Check for brand sheet
             brand_sheet = next((s for s in sheets if 'brand' in s.lower()), None)
             if brand_sheet:
                 logging.info(f"[ConfigurationReader] Using '{brand_sheet}' for brands data")
                 
-                # Read the first few rows to determine structure
-                brand_preview = pd.read_excel(excel_file, sheet_name=brand_sheet, nrows=5)
-                logging.debug(f"[ConfigurationReader] Brand sheet preview:\n{brand_preview}")
-                
-                # Skip instruction rows and read with explicit column names
+                # Read brands with header in row 2
                 brands_df = pd.read_excel(
                     excel_file, 
                     sheet_name=brand_sheet,
-                    skiprows=2,  # Skip the instruction row and header row
-                    names=['BrandCode', 'Description']  # Explicitly define columns
+                    skiprows=1,  # Skip the instruction row
+                    header=0     # Use row 2 as header
                 )
                 
                 # Extract brand codes
-                if not brands_df.empty:
+                if 'BrandCode' in brands_df.columns:
                     self.official_brands = brands_df['BrandCode'].dropna().tolist()
                     logging.info(f"[ConfigurationReader] Loaded {len(self.official_brands)} official brands: {self.official_brands}")
-            else:
-                logging.warning("[ConfigurationReader] No brand sheet found")
             
             # Check for customer mapping sheet
             mapping_sheet = next((s for s in sheets if 'product' in s.lower() or 'mapping' in s.lower() or 'customer' in s.lower()), None)
             if mapping_sheet:
                 logging.info(f"[ConfigurationReader] Using '{mapping_sheet}' for customer mapping data")
                 
-                # Read the first few rows to determine structure
-                mapping_preview = pd.read_excel(excel_file, sheet_name=mapping_sheet, nrows=5)
-                logging.debug(f"[ConfigurationReader] Mapping sheet preview:\n{mapping_preview}")
-                
-                # Skip instruction rows and read with explicit column names
+                # Read mapping with header in row 2
                 mapping_df = pd.read_excel(
                     excel_file, 
                     sheet_name=mapping_sheet,
-                    skiprows=2,  # Skip the instruction row and header row
-                    names=['Code', 'CustomerName', 'CreateSeparateFile', 'RemoveDuplicates', 'Description']  # Explicitly define columns
+                    skiprows=1,  # Skip the instruction row
+                    header=0     # Use row 2 as header
                 )
                 
                 # Process customer mappings
-                if not mapping_df.empty:
+                if 'Code' in mapping_df.columns and 'CustomerName' in mapping_df.columns:
                     # Create customer name mapping - filter out empty/NaN values
                     valid_rows = mapping_df[mapping_df['Code'].notna()]
                     self.product_num_mapping = dict(zip(
@@ -138,26 +121,26 @@ class ConfigurationReader:
                     ))
                     
                     # Create separate file list
-                    separate_file_mask = (mapping_df['CreateSeparateFile'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
-                    if separate_file_mask.any():
-                        self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
+                    if 'CreateSeparateFile' in mapping_df.columns:
+                        separate_file_mask = (mapping_df['CreateSeparateFile'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
+                        if separate_file_mask.any():
+                            self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
                     
                     # Create deduplication list
-                    dedup_mask = (mapping_df['RemoveDuplicates'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
-                    if dedup_mask.any():
-                        self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
+                    if 'RemoveDuplicates' in mapping_df.columns:
+                        dedup_mask = (mapping_df['RemoveDuplicates'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
+                        if dedup_mask.any():
+                            self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
                     
                     logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
                     logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
                     logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
-            else:
-                logging.warning("[ConfigurationReader] No customer mapping sheet found")
                 
             return True
                 
         except Exception as e:
             logging.error(f"[ConfigurationReader] Error parsing config file: {str(e)}")
-        return False
+            return False
     
     def get_official_brands(self) -> List[str]:
         """Get list of official brands to filter out."""
