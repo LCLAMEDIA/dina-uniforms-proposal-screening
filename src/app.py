@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 import json
+import numpy as np
 
 from AzureOperations import AzureOperations
 from GoogleDocsOperations import GoogleDocsOperations
@@ -130,6 +131,19 @@ def stock_status_report_automation():
         response.status_code = 500
         return response
 
+def convert_numpy_types(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    return obj
+
 @app.route("/open-orders-report/process", methods=["POST"])
 def sharepoint_process_oor():
     try:
@@ -172,13 +186,14 @@ def sharepoint_process_oor():
         for file_type, filename in result.get('output_files', {}).items():
             file_count = 0
             if file_type == 'generic' and result.get('generic_rows'):
-                file_count = result.get('generic_rows')
+                # Convert NumPy int64 to Python int
+                file_count = int(result.get('generic_rows'))
             elif file_type == 'calvary' and result.get('calvary_rows'):
-                file_count = result.get('calvary_rows')
+                file_count = int(result.get('calvary_rows'))
             elif file_type == 'former_customers' and result.get('filtered_brand_rows'):
-                file_count = result.get('filtered_brand_rows')
+                file_count = int(result.get('filtered_brand_rows'))
             elif file_type == 'others' and result.get('remaining_rows'):
-                file_count = result.get('remaining_rows')
+                file_count = int(result.get('remaining_rows'))
             
             file_info = {
                 "file_type": file_type.capitalize(),
@@ -194,34 +209,36 @@ Open Orders Report Processing Complete
 Source File: {file_name}
 Processed On: {today_fmt}
 Processing Time: {round(result.get('duration', 0), 2)} seconds
-Total Records: {result.get('total_rows', 0)}
+Total Records: {int(result.get('total_rows', 0))}
 
 Generated Files:
 {output_files_text}
 Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/
 """
         
-        # Create structured response with both raw text and object data
+        # Create structured response with both raw text and object data - Convert numeric values to native Python types
         response_data = {
             "success": True,
             "raw_message": raw_message.strip(),
             "data": {
                 "source_file": file_name,
                 "processed_date": today_fmt,
-                "processing_time_seconds": round(result.get('duration', 0), 2),
-                "total_records": result.get('total_rows', 0),
+                "processing_time_seconds": float(round(result.get('duration', 0), 2)),
+                "total_records": int(result.get('total_rows', 0)),
                 "output_location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/",
                 "counts": {
-                    "generic": result.get('generic_rows', 0),
-                    "calvary": result.get('calvary_rows', 0),
-                    "former_customers": result.get('filtered_brand_rows', 0),
-                    "others": result.get('remaining_rows', 0)
+                    "generic": int(result.get('generic_rows', 0)),
+                    "calvary": int(result.get('calvary_rows', 0)), 
+                    "former_customers": int(result.get('filtered_brand_rows', 0)),
+                    "others": int(result.get('remaining_rows', 0))
                 },
                 "output_files": output_files_list
             }
         }
         
-        # Return success response with both formats
+        # Convert any remaining NumPy types before returning
+        response_data = convert_numpy_types(response_data)
+        
         return jsonify(response_data), 200
         
     except Exception as e:
