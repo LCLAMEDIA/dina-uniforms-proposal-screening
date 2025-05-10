@@ -20,6 +20,11 @@ os.environ.setdefault('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automa
 # Import the OpenOrdersReporting class
 from OpenOrdersReporting import OpenOrdersReporting
 from ConfigurationReader import ConfigurationReader
+from AzureOperations import AzureOperations
+from SharePointOperations import SharePointOperations
+
+# Define the OOR_CONFIG path
+OOR_CONFIG_PATH = '/Shared Documents/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/OOR_CONFIG.xlsx'
 
 def setup_logging():
     """Configure logging with a more detailed format for debugging."""
@@ -32,6 +37,107 @@ def setup_logging():
         ]
     )
     return logging.getLogger('OORTest')
+
+def debug_excel_content(file_bytes, filename="config.xlsx"):
+    """
+    Debug function to examine Excel file content.
+    
+    Args:
+        file_bytes: The Excel file content as bytes
+        filename: Name of the file for logging purposes
+    """
+    logger = logging.getLogger('OORTest')
+    try:
+        # Create a BytesIO object from the file bytes
+        excel_file = io.BytesIO(file_bytes)
+        
+        # Read the Excel file
+        df_dict = pd.read_excel(excel_file, sheet_name=None, engine='openpyxl')
+        
+        # Log the sheets found
+        logger.info(f"Excel file '{filename}' contains sheets: {list(df_dict.keys())}")
+        
+        # For each sheet, log its structure
+        for sheet_name, df in df_dict.items():
+            logger.info(f"\nSheet '{sheet_name}' structure:")
+            logger.info(f"Columns: {list(df.columns)}")
+            logger.info(f"Number of rows: {len(df)}")
+            logger.info(f"First few rows:\n{df.head()}")
+            
+            # Check for any empty or problematic columns
+            for col in df.columns:
+                null_count = df[col].isnull().sum()
+                if null_count > 0:
+                    logger.warning(f"Column '{col}' has {null_count} null values")
+                
+                # Check for empty strings
+                if df[col].dtype == 'object':
+                    empty_count = (df[col].astype(str) == '').sum()
+                    if empty_count > 0:
+                        logger.warning(f"Column '{col}' has {empty_count} empty strings")
+        
+    except Exception as e:
+        logger.error(f"Error examining Excel file: {str(e)}")
+        raise
+
+def fetch_sharepoint_file(file_path):
+    """
+    Fetch a file from SharePoint using the Azure API.
+    
+    Args:
+        file_path: The path to the file in SharePoint
+        
+    Returns:
+        bytes: The file content if successful, None otherwise
+    """
+    logger = logging.getLogger('OORTest')
+    try:
+        # Initialize Azure and SharePoint connections
+        azure_ops = AzureOperations()
+        access_token = azure_ops.get_access_token()
+        
+        if not access_token:
+            logger.error("Failed to obtain Azure access token")
+            return None
+            
+        sharepoint_ops = SharePointOperations(access_token=access_token)
+        site_id = sharepoint_ops.get_site_id()
+        
+        if not site_id:
+            logger.error("Failed to get SharePoint site ID")
+            return None
+            
+        drive_id = sharepoint_ops.get_drive_id(site_id=site_id)
+        
+        if not drive_id:
+            logger.error("Failed to get SharePoint drive ID")
+            return None
+        
+        # List items in the folder to get the file ID
+        folder_path = os.path.dirname(file_path)
+        items = sharepoint_ops.list_items_in_folder(drive_id, folder_path)
+        
+        # Find the file in the items list
+        file_name = os.path.basename(file_path)
+        file_item = next((item for item in items if item.get('name') == file_name), None)
+        
+        if not file_item:
+            logger.error(f"File not found in SharePoint: {file_path}")
+            return None
+        
+        # Get the file content
+        file_content = sharepoint_ops.get_file_content(drive_id, file_item['id'])
+        
+        if file_content:
+            logger.info(f"Successfully fetched file from SharePoint: {file_path}")
+            return file_content
+        else:
+            logger.error(f"Failed to get file content from SharePoint: {file_path}")
+            return None
+            
+    except Exception as e:
+        logger.exception(f"Error fetching file from SharePoint: {str(e)}")
+        return None
 
 def create_test_config(output_path="test_config.xlsx"):
     """
@@ -112,6 +218,12 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Process the file but don\'t upload to SharePoint')
     parser.add_argument('--create-config', action='store_true', help='Create a test configuration file')
     parser.add_argument('--config-file', help='Path to a configuration file to use (creates one if not exists)')
+    parser.add_argument('--use-sharepoint-config', action='store_true', 
+                       help='Use the SharePoint OOR_CONFIG file instead of local config')
+    parser.add_argument('--fetch-from-sharepoint', action='store_true',
+                       help='Fetch the input file from SharePoint instead of using local file')
+    parser.add_argument('--debug-config', action='store_true',
+                       help='Debug the configuration file content')
     
     args = parser.parse_args()
     
@@ -126,22 +238,38 @@ def main():
         else:
             config_file = args.config_file
     
-    # Check if the input file exists
-    if not os.path.exists(args.excel_file):
-        logger.error(f"Input file does not exist: {args.excel_file}")
-        sys.exit(1)
-    
     try:
-        logger.info(f"Processing file: {args.excel_file}")
+        # Get the Excel file content
+        if args.fetch_from_sharepoint:
+            logger.info(f"Fetching file from SharePoint: {args.excel_file}")
+            excel_file_bytes = fetch_sharepoint_file(args.excel_file)
+            if not excel_file_bytes:
+                logger.error("Failed to fetch file from SharePoint")
+                sys.exit(1)
+        else:
+            # Check if the input file exists
+            if not os.path.exists(args.excel_file):
+                logger.error(f"Input file does not exist: {args.excel_file}")
+                sys.exit(1)
+            
+            # Read the Excel file
+            with open(args.excel_file, 'rb') as file:
+                excel_file_bytes = file.read()
         
-        # Read the Excel file
-        with open(args.excel_file, 'rb') as file:
-            excel_file_bytes = file.read()
+        # Debug configuration if requested
+        if args.debug_config:
+            if args.use_sharepoint_config:
+                config_bytes = fetch_sharepoint_file(OOR_CONFIG_PATH)
+                if config_bytes:
+                    debug_excel_content(config_bytes, "SharePoint OOR_CONFIG.xlsx")
+            elif config_file:
+                with open(config_file, 'rb') as f:
+                    debug_excel_content(f.read(), config_file)
         
         # Create an instance of OpenOrdersReporting
         if args.dry_run:
             # For dry run, mock the SharePoint uploads and config loading
-            with mock_sharepoint_operations(config_file):
+            with mock_sharepoint_operations(config_file, use_sharepoint_config=args.use_sharepoint_config):
                 oor = OpenOrdersReporting()
                 result = oor.process_excel_file(excel_file_bytes, os.path.basename(args.excel_file))
         else:
@@ -169,8 +297,9 @@ class mock_sharepoint_operations:
     Context manager to mock SharePoint operations for testing.
     This mocks both uploads and configuration file reading.
     """
-    def __init__(self, config_file=None):
+    def __init__(self, config_file=None, use_sharepoint_config=False):
         self.config_file = config_file
+        self.use_sharepoint_config = use_sharepoint_config
     
     def __enter__(self):
         # Setup patching for SharePointOperations
@@ -203,12 +332,24 @@ class mock_sharepoint_operations:
                         return "mock-drive-id"
                     
                     def mocked_list_items_in_folder(self, drive_id, folder_path):
-                        if self.config_file:
+                        if self.use_sharepoint_config:
+                            # Return the SharePoint OOR_CONFIG path
+                            return [{"name": "OOR_CONFIG.xlsx", "id": "mock-config-id", "path": OOR_CONFIG_PATH}]
+                        elif self.config_file:
                             return [{"name": "OOR_CONFIG.xlsx", "id": "mock-config-id"}]
                         return []
                     
                     def mocked_get_file_content(self, drive_id, item_id):
-                        if self.config_file and item_id == "mock-config-id":
+                        if self.use_sharepoint_config:
+                            # Try to read from the SharePoint OOR_CONFIG path
+                            try:
+                                with open(OOR_CONFIG_PATH, 'rb') as f:
+                                    return f.read()
+                            except FileNotFoundError:
+                                logger = logging.getLogger('OORTest')
+                                logger.error(f"SharePoint OOR_CONFIG file not found at {OOR_CONFIG_PATH}")
+                                return None
+                        elif self.config_file and item_id == "mock-config-id":
                             with open(self.config_file, 'rb') as f:
                                 return f.read()
                         return None
