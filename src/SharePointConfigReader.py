@@ -1,6 +1,8 @@
 import io
 import logging
 import pandas as pd
+import os
+import requests
 
 class SharePointConfigReader:
     """
@@ -40,17 +42,22 @@ class SharePointConfigReader:
                 'Authorization': f'Bearer {self.sharepoint_ops.access_token}'
             }
             
+            self.logger.info(f"[ConfigReader] Making request to SharePoint API: {url}")
             response = requests.request("GET", url, headers=headers)
             
             if response.status_code != 200:
-                self.logger.error(f"[ConfigReader] Failed to retrieve files from path: {config_path}")
+                self.logger.error(f"[ConfigReader] Failed to retrieve files from path: {config_path}. Status code: {response.status_code}")
+                self.logger.error(f"[ConfigReader] Response content: {response.text}")
                 return False
                 
             response_dict = response.json()
             files = response_dict.get("value", [])
+            self.logger.info(f"[ConfigReader] Found {len(files)} total files in directory")
             
             # Filter files by prefix and sort by last modified date
             config_files = [f for f in files if f.get("name", "").startswith(self.config_prefix)]
+            self.logger.info(f"[ConfigReader] Found {len(config_files)} files with prefix {self.config_prefix}")
+            
             if not config_files:
                 self.logger.error(f"[ConfigReader] No files with prefix {self.config_prefix} found in path {config_path}")
                 return False
@@ -60,6 +67,8 @@ class SharePointConfigReader:
             
             # Get the most recent file
             latest_file = config_files[0]
+            self.logger.info(f"[ConfigReader] Selected most recent config file: {latest_file.get('name')} (Modified: {latest_file.get('lastModifiedDateTime')})")
+            
             download_url = latest_file.get("@microsoft.graph.downloadUrl")
             
             if not download_url:
@@ -67,15 +76,83 @@ class SharePointConfigReader:
                 return False
                 
             # Download the file
+            self.logger.info(f"[ConfigReader] Downloading config file from URL")
             file_response = requests.get(download_url)
+            
             if file_response.status_code != 200:
-                self.logger.error(f"[ConfigReader] Failed to download file: {latest_file.get('name')}")
+                self.logger.error(f"[ConfigReader] Failed to download config file. Status code: {file_response.status_code}")
                 return False
                 
-            config_bytes = file_response.content
+            # Read Excel file
+            excel_file = io.BytesIO(file_response.content)
+            self.logger.info(f"[ConfigReader] Successfully downloaded config file, size: {len(file_response.content)} bytes")
             
-            # Parse the configuration Excel file
-            return self._parse_config_file(config_bytes)
+            # Get sheet names
+            sheet_names = pd.ExcelFile(excel_file).sheet_names
+            self.logger.info(f"[ConfigReader] Excel file contains sheets: {sheet_names}")
+            
+            # Load brand codes sheet if available
+            if 'BrandCodes' in sheet_names:
+                brand_codes_df = pd.read_excel(excel_file, sheet_name='BrandCodes')
+                if not brand_codes_df.empty and 'BrandCode' in brand_codes_df.columns:
+                    self.config_data['official_brands'] = brand_codes_df['BrandCode'].tolist()
+                    self.logger.info(f"[ConfigReader] Loaded {len(self.config_data['official_brands'])} brand codes")
+            
+            # Load product mapping sheet if available
+            if 'ProductMapping' in sheet_names:
+                product_mapping_df = pd.read_excel(excel_file, sheet_name='ProductMapping')
+                
+                # Basic mapping from Code to CustomerName for customer display
+                if not product_mapping_df.empty and 'Code' in product_mapping_df.columns and 'CustomerName' in product_mapping_df.columns:
+                    self.config_data['product_num_mapping'] = dict(zip(
+                        product_mapping_df['Code'], 
+                        product_mapping_df['CustomerName']
+                    ))
+                    self.logger.info(f"[ConfigReader] Loaded {len(self.config_data['product_num_mapping'])} product mappings")
+                
+                # Enhanced processing rules for each product code
+                if not product_mapping_df.empty and 'Code' in product_mapping_df.columns:
+                    # Check for the additional processing columns
+                    has_separate_file = 'CreateSeparateFile' in product_mapping_df.columns
+                    has_remove_duplicates = 'RemoveDuplicates' in product_mapping_df.columns
+                    
+                    # Create processing rules dictionary
+                    processing_rules = {}
+                    
+                    for _, row in product_mapping_df.iterrows():
+                        code = row['Code']
+                        rule = {
+                            'customer_name': row['CustomerName'] if 'CustomerName' in product_mapping_df.columns else code,
+                        }
+                        
+                        # Add separate file flag if available
+                        if has_separate_file:
+                            rule['create_separate_file'] = (
+                                str(row['CreateSeparateFile']).strip().lower() == 'yes'
+                            )
+                        
+                        # Add remove duplicates flag if available
+                        if has_remove_duplicates:
+                            rule['remove_duplicates'] = (
+                                str(row['RemoveDuplicates']).strip().lower() == 'yes'
+                            )
+                        
+                        processing_rules[code] = rule
+                    
+                    self.config_data['processing_rules'] = processing_rules
+                    self.logger.info(f"[ConfigReader] Loaded {len(processing_rules)} product processing rules")
+            
+            # Load task queue mapping if available
+            if 'TaskQueueMapping' in sheet_names:
+                taskqueue_df = pd.read_excel(excel_file, sheet_name='TaskQueueMapping')
+                if not taskqueue_df.empty and 'TaskValue' in taskqueue_df.columns and 'NoteValue' in taskqueue_df.columns:
+                    self.config_data['taskqueue_mapping'] = dict(zip(
+                        taskqueue_df['TaskValue'], 
+                        taskqueue_df['NoteValue']
+                    ))
+                    self.logger.info(f"[ConfigReader] Loaded {len(self.config_data['taskqueue_mapping'])} task queue mappings")
+            
+            return True
             
         except Exception as e:
             self.logger.error(f"[ConfigReader] Error loading configuration: {str(e)}")
