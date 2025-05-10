@@ -28,6 +28,7 @@ class OpenOrdersReporting:
         self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
         self.config_prefix = os.environ.get('OOR_CONFIG_PREFIX', 'OOR_CONFIG')
+        self.config_path = os.environ.get('OOR_CONFIG_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/')
         
         # Load configuration from SharePoint
         self.config_reader = SharePointConfigReader(self.sharepoint_ops, self.config_prefix)
@@ -41,7 +42,7 @@ class OpenOrdersReporting:
             self.product_num_mapping = self.config_reader.get_product_num_mapping()
             self.taskqueue_mapping = self.config_reader.get_taskqueue_mapping()
             self.processing_rules = self.config_reader.get_processing_rules()
-            logging.info("[OpenOrdersReporting] Configuration loaded from SharePoint")
+            logging.info("[OpenOrdersReporting] Configuration successfully loaded from SharePoint")
         else:
             # Use default values as fallback
             logging.warning("[OpenOrdersReporting] Using default configuration values")

@@ -30,18 +30,50 @@ class SharePointConfigReader:
             bool: True if configuration was loaded successfully
         """
         try:
-            self.logger.info(f"[ConfigReader] Loading configuration with prefix: {self.config_prefix}")
+            config_path = os.environ.get('OOR_CONFIG_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/')
+            self.logger.info(f"[ConfigReader] Loading configuration with prefix: {self.config_prefix} from path: {config_path}")
             
-            # Get the latest config file matching the prefix
-            config_bytes = self.sharepoint_ops.get_bytes_for_latest_file_with_prefix(
-                prefix=self.config_prefix, 
-                drive_id=drive_id
-            )
+            # Get all files in the path
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:{config_path}:/children"
             
-            if not config_bytes:
-                self.logger.error(f"[ConfigReader] Failed to retrieve configuration file")
+            headers = {
+                'Authorization': f'Bearer {self.sharepoint_ops.access_token}'
+            }
+            
+            response = requests.request("GET", url, headers=headers)
+            
+            if response.status_code != 200:
+                self.logger.error(f"[ConfigReader] Failed to retrieve files from path: {config_path}")
                 return False
                 
+            response_dict = response.json()
+            files = response_dict.get("value", [])
+            
+            # Filter files by prefix and sort by last modified date
+            config_files = [f for f in files if f.get("name", "").startswith(self.config_prefix)]
+            if not config_files:
+                self.logger.error(f"[ConfigReader] No files with prefix {self.config_prefix} found in path {config_path}")
+                return False
+                
+            # Sort by last modified date (newest first)
+            config_files.sort(key=lambda x: x.get("lastModifiedDateTime", ""), reverse=True)
+            
+            # Get the most recent file
+            latest_file = config_files[0]
+            download_url = latest_file.get("@microsoft.graph.downloadUrl")
+            
+            if not download_url:
+                self.logger.error(f"[ConfigReader] Failed to get download URL for file: {latest_file.get('name')}")
+                return False
+                
+            # Download the file
+            file_response = requests.get(download_url)
+            if file_response.status_code != 200:
+                self.logger.error(f"[ConfigReader] Failed to download file: {latest_file.get('name')}")
+                return False
+                
+            config_bytes = file_response.content
+            
             # Parse the configuration Excel file
             return self._parse_config_file(config_bytes)
             
