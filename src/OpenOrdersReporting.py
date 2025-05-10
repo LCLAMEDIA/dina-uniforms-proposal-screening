@@ -21,7 +21,10 @@ class OpenOrdersReporting:
         # Initialize Azure and SharePoint connections
         self.azure_ops = AzureOperations()
         access_token = self.azure_ops.get_access_token()
+        logging.info("[OpenOrdersReporting] Successfully obtained Azure access token")
+        
         self.sharepoint_ops = SharePointOperations(access_token=access_token)
+        logging.info("[OpenOrdersReporting] Initialized SharePoint operations")
         
         # Configure folder paths based on environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
@@ -30,11 +33,17 @@ class OpenOrdersReporting:
         self.config_prefix = os.environ.get('OOR_CONFIG_PREFIX', 'OOR_CONFIG')
         self.config_path = os.environ.get('OOR_CONFIG_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/')
         
+        logging.info(f"[OpenOrdersReporting] Using config prefix: {self.config_prefix}")
+        logging.info(f"[OpenOrdersReporting] Using config path: {self.config_path}")
+        
         # Load configuration from SharePoint
         self.config_reader = SharePointConfigReader(self.sharepoint_ops, self.config_prefix)
         site_id = self.sharepoint_ops.get_site_id()
         drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
+        logging.info(f"[OpenOrdersReporting] Got SharePoint site_id: {site_id} and drive_id: {drive_id}")
+        
         config_loaded = self.config_reader.load_config(drive_id)
+        logging.info(f"[OpenOrdersReporting] Configuration loaded successfully: {config_loaded}")
         
         # Load configurations or use defaults
         if config_loaded:
@@ -42,10 +51,13 @@ class OpenOrdersReporting:
             self.product_num_mapping = self.config_reader.get_product_num_mapping()
             self.taskqueue_mapping = self.config_reader.get_taskqueue_mapping()
             self.processing_rules = self.config_reader.get_processing_rules()
-            logging.info("[OpenOrdersReporting] Configuration successfully loaded from SharePoint")
+            logging.info(f"[OpenOrdersReporting] Loaded {len(self.official_brands)} official brands")
+            logging.info(f"[OpenOrdersReporting] Loaded {len(self.product_num_mapping)} product mappings")
+            logging.info(f"[OpenOrdersReporting] Loaded {len(self.taskqueue_mapping)} task queue mappings")
+            logging.info(f"[OpenOrdersReporting] Loaded {len(self.processing_rules)} processing rules")
         else:
-            # Use default values as fallback
             logging.warning("[OpenOrdersReporting] Using default configuration values")
+            # Use default values as fallback
             self.official_brands = [
                 'COA', 'BUP', 'CSR', 'CNR', 'BUS', 'CAL', 'IMB', 'JET',
                 'JETSTAR', 'JS', 'NRMA', 'MTS', 'SCENTRE', 'SYD', 'RFDS', 'RFL'
@@ -98,18 +110,7 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
         
         if len(excel_file_bytes) > 10:
-              logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")   
-        
-        # Statistics tracking
-        stats = {
-            'input_file': filename,
-            'total_rows': 0,
-            'filtered_brand_rows': 0,
-            'duplicate_rows_removed': 0,
-            'output_files': {},
-            'product_counts': {},
-            'start_time': datetime.now(),
-        }
+            logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")
         
         try:
             # Read the Excel file from bytes
@@ -122,11 +123,24 @@ class OpenOrdersReporting:
             # Log the column names to verify
             logging.info(f"[OpenOrdersReporting] Excel columns: {list(df.columns)}")
             
+            # Log first few rows for debugging
+            logging.info(f"[OpenOrdersReporting] First 3 rows of data:\n{df.head(3).to_string()}")
+            
             # Clean up any 'Unnamed' columns if they exist
             unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
             if unnamed_cols:
                 logging.info(f"[OpenOrdersReporting] Removing unnamed columns: {unnamed_cols}")
                 df = df.drop(columns=unnamed_cols)
+            
+            stats = {
+                'input_file': filename,
+                'total_rows': 0,
+                'filtered_brand_rows': 0,
+                'duplicate_rows_removed': 0,
+                'output_files': {},
+                'product_counts': {},
+                'start_time': datetime.now(),
+            }
             
             stats['total_rows'] = len(df)
             logging.info(f"[OpenOrdersReporting] Successfully read Excel file with {len(df)} rows")
