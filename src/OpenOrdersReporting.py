@@ -217,21 +217,41 @@ class OpenOrdersReporting:
                 )
                 stats['output_files']['main'] = others_filename
             
-            # Upload Calvary file if it was split out
-            if not calvary_df.empty:
-                calvary_filename = f"CALVARY {today_filename_fmt}.csv"
-                calvary_path = f"{processed_date_dir}/{calvary_filename}"
-                calvary_bytes = self._dataframe_to_csv_bytes(calvary_df)
+            
+            
+            # Upload separate customer files
+            for customer_code, customer_df in separate_customer_dfs.items():
+                if not customer_df.empty:
+                    customer_filename = f"{customer_code} OOR {today_filename_fmt}.csv"
+                    customer_path = f"{processed_date_dir}/{customer_filename}"
+                    customer_bytes = self._dataframe_to_csv_bytes(customer_df)
+                    
+                    # Upload to SharePoint
+                    self.sharepoint_ops.upload_file_to_path(
+                        drive_id=drive_id,
+                        file_path=customer_path,
+                        file_name=customer_filename,
+                        file_bytes=customer_bytes,
+                        content_type="text/csv"
+                    )
+                    stats['output_files'][customer_code.lower()] = customer_filename
+                    logging.info(f"[OpenOrdersReporting] Uploaded separate file for {customer_code}: {customer_filename}")
+                        
+            # # Upload Calvary file if it was split out
+            # if not calvary_df.empty:
+            #     calvary_filename = f"CALVARY {today_filename_fmt}.csv"
+            #     calvary_path = f"{processed_date_dir}/{calvary_filename}"
+            #     calvary_bytes = self._dataframe_to_csv_bytes(calvary_df)
                 
-                # Upload to SharePoint
-                self.sharepoint_ops.upload_file_to_path(
-                    drive_id=drive_id,
-                    file_path=calvary_path,
-                    file_name=calvary_filename,
-                    file_bytes=calvary_bytes, 
-                    content_type="text/csv"
-                )
-                stats['output_files']['calvary'] = calvary_filename
+            #     # Upload to SharePoint
+            #     self.sharepoint_ops.upload_file_to_path(
+            #         drive_id=drive_id,
+            #         file_path=calvary_path,
+            #         file_name=calvary_filename,
+            #         file_bytes=calvary_bytes, 
+            #         content_type="text/csv"
+            #     )
+            #     stats['output_files']['calvary'] = calvary_filename
             
             # Note: Former customers data is intentionally not saved
             
