@@ -53,7 +53,9 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
         logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
         
-    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None, require_full_reporting: bool = True, split_calvary: bool = True) -> Dict[str, Any]:
+    # Update to the process_excel_file method to use the enhanced deduplication
+
+    def process_excel_file(self, excel_file_bytes: bytes, filename: str = None) -> Dict[str, Any]:
         """
         Process an Excel file containing an Open Order Report.
         Returns statistics about the processing and uploads files to SharePoint.
@@ -61,30 +63,22 @@ class OpenOrdersReporting:
         Parameters:
         - excel_file_bytes: The bytes of the Excel file to process
         - filename: The name of the input file
-        - require_full_reporting: If True, keep all data in one file except removed duplicates. 
-                                   If False, split into separate files.
-        - split_calvary: If True, split Calvary records even when doing full reporting
-                        (used during Calvary's first rollout period)
         """
         
         logging.info(f"[OpenOrdersReporting] Processing file: {filename}")
-        logging.info(f"[OpenOrdersReporting] Full reporting required: {require_full_reporting}")
-        logging.info(f"[OpenOrdersReporting] Split Calvary: {split_calvary}")
         logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
         
         if len(excel_file_bytes) > 10:
-              logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")   
+            logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")   
         
         # Statistics tracking
         stats = {
             'input_file': filename,
             'total_rows': 0,
-            'generic_rows': 0,
-            'calvary_rows': 0,
             'filtered_brand_rows': 0,
-            'duplicate_orders_removed': 0,
-            'remaining_rows': 0,
+            'duplicate_rows_removed': 0,
             'output_files': {},
+            'product_counts': {},
             'start_time': datetime.now(),
         }
         
@@ -112,20 +106,14 @@ class OpenOrdersReporting:
             main_df = df.copy()
             product_num_column = 'ProductNum'  # Key column for filtering
             
-            # Initialize dataframes that will be used for different processing paths
-            calvary_df = pd.DataFrame()
-            former_customers_df = pd.DataFrame()
+            # 1. FIRST - Apply deduplication based on product code configuration
+            before_dedup_count = len(main_df)
+            main_df = self._remove_duplicates_by_customer(main_df)
+            after_dedup_count = len(main_df)
+            stats['duplicate_rows_removed'] = before_dedup_count - after_dedup_count
+            logging.info(f"[OpenOrdersReporting] Total duplicates removed: {stats['duplicate_rows_removed']}")
             
-            # 1. FIRST - Remove duplicates based on Order column
-            if 'Order' in main_df.columns and not main_df.empty and self.dedup_customers:
-                before_count = len(main_df)
-                main_df = self._remove_duplicates_by_customer(main_df)
-                after_count = len(main_df)
-                stats['duplicate_orders_removed'] = before_count - after_count
-                logging.info(f"[OpenOrdersReporting] Removed {stats['duplicate_orders_removed']} duplicate orders")
-
-            
-            # 2. SECOND - Remove former customers (official brands) as they don't need open order reporting
+            # 2. SECOND - Filter out brands from the official brands list
             if product_num_column in main_df.columns:
                 former_customers_mask = pd.Series(False, index=main_df.index)
                 for brand in self.official_brands:
@@ -138,54 +126,51 @@ class OpenOrdersReporting:
                     former_customers_df = main_df[former_customers_mask].copy()
                     stats['filtered_brand_rows'] = len(former_customers_df)
                     main_df = main_df[~former_customers_mask].copy()
-                    logging.info(f"[OpenOrdersReporting] Removed {len(former_customers_df)} former customer rows")
+                    logging.info(f"[OpenOrdersReporting] Removed {len(former_customers_df)} filtered brand rows")
             
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. FOURTH - Handle generic sample processing without separating them
-            # - We'll note the count for statistics only
-            if product_num_column in main_df.columns:
-                generic_exact_mask = main_df[product_num_column] == "GENERIC"
-                generic_sample_mask = main_df[product_num_column].astype(str).str.contains("GENERIC-SAMPLE", case=False, na=False)
-                
-                generic_count = generic_exact_mask.sum()
-                generic_sample_count = generic_sample_mask.sum()
-                stats['generic_rows'] = generic_count + generic_sample_count
-                
-                if generic_count > 0 or generic_sample_count > 0:
-                    logging.info(f"[OpenOrdersReporting] Found {generic_count} GENERIC and {generic_sample_count} GENERIC-SAMPLE rows (kept in main dataframe)")
+            # 4. FOURTH - Split data by product code based on configuration
+            product_dataframes = {}
+            remaining_df = main_df.copy()
             
-            # 5. FIFTH - Split Calvary if required
-            separate_customer_dfs = {}
-            for customer_code in self.separate_file_customers:
-                if product_num_column in main_df.columns:
-                    # Match both prefix and exact matches
-                    prefix_mask = main_df[product_num_column].astype(str).str.startswith(f"{customer_code}-", na=False)
-                    exact_match_mask = main_df[product_num_column].astype(str) == customer_code
-                    customer_mask = prefix_mask | exact_match_mask
+            if product_num_column in remaining_df.columns:
+                # Process each product code that has processing rules
+                for product_code, rule in self.processing_rules.items():
+                    # Skip if not configured to create a separate file
+                    if not rule.get('create_separate_file', False):
+                        continue
                     
-                    if customer_mask.any():
-                        # Create a copy for this customer
-                        customer_df = main_df[customer_mask].copy()
-                        customer_df = self._add_checking_customer_columns(customer_df)
-                        customer_df = self._apply_processing(customer_df, customer_code)
+                    # Create product code mask
+                    exact_match = remaining_df[product_num_column] == product_code
+                    prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
+                    product_mask = exact_match | prefix_match
+                    
+                    if product_mask.any():
+                        # Extract matching rows to a separate dataframe
+                        product_df = remaining_df[product_mask].copy()
+                        product_df = self._add_checking_customer_columns(product_df)
                         
-                        # Store customer-specific dataframe
-                        separate_customer_dfs[customer_code] = customer_df
+                        # Apply customer name mapping
+                        product_df = self._apply_processing(product_df, product_code)
                         
-                        # Update statistics for specific customers
-                        if customer_code in ['CLY', 'CAL']:
-                            stats['calvary_rows'] += len(customer_df)
+                        # Add to the product dataframes dictionary
+                        product_dataframes[product_code] = product_df
                         
-                        # Remove these rows from main dataframe
-                        main_df = main_df[~customer_mask].copy()
-                        logging.info(f"[OpenOrdersReporting] Separated {len(customer_df)} {customer_code} rows")
+                        # Update stats
+                        stats['product_counts'][product_code] = len(product_df)
+                        
+                        # Remove from the main dataframe
+                        remaining_df = remaining_df[~product_mask].copy()
+                        logging.info(f"[OpenOrdersReporting] Separated {len(product_df)} {product_code} rows")
             
-            # Apply customer/checking note processing to main dataframe
-            main_df = self._apply_processing(main_df, "OTHERS")
-            stats['remaining_rows'] = len(main_df)
+            # 5. FIFTH - Process the remaining data
+            # Apply customer/checking note processing to remaining dataframe
+            remaining_df = self._apply_processing(remaining_df, "OTHERS")
+            stats['remaining_rows'] = len(remaining_df)
             
+            # 6. SIXTH - Prepare for output
             # Save and upload CSV files
             today_filename_fmt = datetime.now().strftime("%Y%m%d")
             today_folder_fmt = datetime.now().strftime("%d-%m-%y")
@@ -196,16 +181,16 @@ class OpenOrdersReporting:
             site_id = self.sharepoint_ops.get_site_id()
             drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
             
-            # Upload each file to SharePoint
-            if not main_df.empty:
-                # Name differs based on whether this is a full report or split files
-                if require_full_reporting:
-                    others_filename = f"OOR {today_filename_fmt}.csv"
-                else:
+            # 7. SEVENTH - Upload main file if it's not empty
+            if not remaining_df.empty:
+                # Check if we're generating separate files or just one main file
+                if product_dataframes:
                     others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
+                else:
+                    others_filename = f"OOR {today_filename_fmt}.csv"
                     
                 others_path = f"{processed_date_dir}/{others_filename}"
-                others_bytes = self._dataframe_to_csv_bytes(main_df)
+                others_bytes = self._dataframe_to_csv_bytes(remaining_df)
                 
                 # Upload to SharePoint
                 self.sharepoint_ops.upload_file_to_path(
@@ -217,43 +202,26 @@ class OpenOrdersReporting:
                 )
                 stats['output_files']['main'] = others_filename
             
-            
-            
-            # Upload separate customer files
-            for customer_code, customer_df in separate_customer_dfs.items():
-                if not customer_df.empty:
-                    customer_filename = f"{customer_code} OOR {today_filename_fmt}.csv"
-                    customer_path = f"{processed_date_dir}/{customer_filename}"
-                    customer_bytes = self._dataframe_to_csv_bytes(customer_df)
+            # 8. EIGHTH - Upload product-specific files
+            for product_code, product_df in product_dataframes.items():
+                if product_df.empty:
+                    continue
                     
-                    # Upload to SharePoint
-                    self.sharepoint_ops.upload_file_to_path(
-                        drive_id=drive_id,
-                        file_path=customer_path,
-                        file_name=customer_filename,
-                        file_bytes=customer_bytes,
-                        content_type="text/csv"
-                    )
-                    stats['output_files'][customer_code.lower()] = customer_filename
-                    logging.info(f"[OpenOrdersReporting] Uploaded separate file for {customer_code}: {customer_filename}")
-                        
-            # # Upload Calvary file if it was split out
-            # if not calvary_df.empty:
-            #     calvary_filename = f"CALVARY {today_filename_fmt}.csv"
-            #     calvary_path = f"{processed_date_dir}/{calvary_filename}"
-            #     calvary_bytes = self._dataframe_to_csv_bytes(calvary_df)
+                # Get customer name from processing rules
+                customer_name = self.processing_rules[product_code].get('customer_name', product_code)
+                product_filename = f"{customer_name} {today_filename_fmt}.csv"
+                product_path = f"{processed_date_dir}/{product_filename}"
+                product_bytes = self._dataframe_to_csv_bytes(product_df)
                 
-            #     # Upload to SharePoint
-            #     self.sharepoint_ops.upload_file_to_path(
-            #         drive_id=drive_id,
-            #         file_path=calvary_path,
-            #         file_name=calvary_filename,
-            #         file_bytes=calvary_bytes, 
-            #         content_type="text/csv"
-            #     )
-            #     stats['output_files']['calvary'] = calvary_filename
-            
-            # Note: Former customers data is intentionally not saved
+                # Upload to SharePoint
+                self.sharepoint_ops.upload_file_to_path(
+                    drive_id=drive_id,
+                    file_path=product_path,
+                    file_name=product_filename,
+                    file_bytes=product_bytes, 
+                    content_type="text/csv"
+                )
+                stats['output_files'][product_code] = product_filename
             
             # Finalize stats
             stats['success'] = True
@@ -268,25 +236,104 @@ class OpenOrdersReporting:
             logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}")
             raise
     
-    # def _remove_order_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-    #     """Remove duplicate orders, keeping the first occurrence of each order"""
-    #     if df.empty or 'Order' not in df.columns:
-    #         return df
-    #     
-    #     logging.info(f"[OpenOrdersReporting] Removing duplicates based on Order column from dataframe with {len(df)} rows")
-    #     
-    #     # Get count before deduplication
-    #     before_count = len(df)
-    #     
-    #     # Remove duplicates based on Order column
-    #     df = df.drop_duplicates(subset=['Order'], keep='first')
-    #     
-    #     # Get count after deduplication
-    #     after_count = len(df)
-    #     
-    #     logging.info(f"[OpenOrdersReporting] Removed {before_count - after_count} duplicate orders")
-    #     
-    #     return df
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Enhanced duplicate removal that properly compares all columns.
+        This considers all columns after stripping whitespace to determine if rows are truly duplicates.
+        
+        Args:
+            df: DataFrame to process
+            
+        Returns:
+            DataFrame with duplicates removed
+        """
+        if df.empty:
+            return df
+            
+        # Get the row count before deduplication
+        before_count = len(df)
+        
+        # Create a copy to avoid modifying the original
+        processed_df = df.copy()
+        
+        # Process string columns to strip whitespace
+        for col in processed_df.columns:
+            if processed_df[col].dtype == 'object':  # Only process string columns
+                processed_df[col] = processed_df[col].astype(str).str.strip()
+        
+        # Drop exact duplicates (comparing all columns)
+        # This will only remove rows that are exact duplicates across ALL columns
+        df_deduped = processed_df.drop_duplicates(keep='first')
+        
+        # Get row count after deduplication
+        after_count = len(df_deduped)
+        removed_count = before_count - after_count
+        
+        if removed_count > 0:
+            logging.info(f"[OpenOrdersReporting] Removed {removed_count} exact duplicate rows (all columns compared)")
+        
+        # Map back the indices to the original dataframe
+        # We need to preserve the original data (not the whitespace-stripped version)
+        original_indices = df_deduped.index
+        result_df = df.iloc[original_indices].copy()
+        
+        return result_df
+
+    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove duplicate orders based on customer configuration.
+        Only applies to product codes configured for deduplication.
+        Compares all columns to determine if rows are truly duplicates.
+        
+        Args:
+            df: DataFrame to process
+            
+        Returns:
+            DataFrame with duplicates removed for configured product codes
+        """
+        if df.empty or 'ProductNum' not in df.columns:
+            return df
+        
+        # Track product codes that need deduplication
+        dedup_product_codes = []
+        for code, rule in self.processing_rules.items():
+            if rule.get('remove_duplicates', False):
+                dedup_product_codes.append(code)
+        
+        # Skip if no products need deduplication
+        if not dedup_product_codes:
+            return df
+        
+        logging.info(f"[OpenOrdersReporting] Performing deduplication for product codes: {dedup_product_codes}")
+        
+        # Create masks for each product code that needs deduplication
+        dedup_masks = {}
+        for code in dedup_product_codes:
+            # Match both exact code and code-prefixed values
+            exact_match = df['ProductNum'] == code
+            prefix_match = df['ProductNum'].astype(str).str.startswith(f"{code}-", na=False)
+            dedup_masks[code] = exact_match | prefix_match
+        
+        # Combine all product code masks
+        combined_mask = pd.Series(False, index=df.index)
+        for mask in dedup_masks.values():
+            combined_mask = combined_mask | mask
+        
+        # Split dataframe into parts that need deduplication and parts that don't
+        to_dedup_df = df[combined_mask].copy()
+        no_dedup_df = df[~combined_mask].copy()
+        
+        # Apply deduplication to the part that needs it
+        if not to_dedup_df.empty:
+            deduped_df = self._remove_duplicates(to_dedup_df)
+            logging.info(f"[OpenOrdersReporting] Removed {len(to_dedup_df) - len(deduped_df)} duplicates from products configured for deduplication")
+            
+            # Combine the deduped part with the part that didn't need deduplication
+            result_df = pd.concat([deduped_df, no_dedup_df])
+            return result_df
+        
+        # If nothing to deduplicate, return original dataframe
+        return df
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
