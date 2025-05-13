@@ -34,6 +34,16 @@ class OpenOrdersReporting:
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
         self.dedup_customers = self.config_reader.get_dedup_customers()
         
+
+
+        # Create processing rules from configuration data
+        self.processing_rules = {}
+        for product_code, customer_name in self.product_num_mapping.items():
+            self.processing_rules[product_code] = {
+                'customer_name': customer_name,
+                'create_separate_file': product_code in self.separate_file_customers,
+                'remove_duplicates': product_code in self.dedup_customers
+            }
         # Add detailed configuration logging
         logging.info("[OpenOrdersReporting] Loaded configuration values:")
         logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
@@ -52,6 +62,8 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
         logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
         logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
+        logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
+    
         
     # Update to the process_excel_file method to use the enhanced deduplication
 
