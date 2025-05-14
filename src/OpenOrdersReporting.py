@@ -52,6 +52,10 @@ class OpenOrdersReporting:
                 'create_separate_file': product_code in self.separate_file_customers,
                 'remove_duplicates': product_code in self.dedup_customers
             }
+        
+        # Validate no overlapping prefixes for separate files
+        self._validate_product_codes()
+        
         # Add detailed configuration logging
         logging.info("[OpenOrdersReporting] Loaded configuration values:")
         logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
@@ -298,6 +302,13 @@ class OpenOrdersReporting:
             main_df = df.copy()
             product_num_column = 'ProductNum'  # Key column for filtering
             
+            # Check required columns exist to avoid errors later
+            required_columns = [product_num_column, 'DateIssued', 'Order']  # Add other critical columns
+            missing_columns = [col for col in required_columns if col not in main_df.columns]
+            if missing_columns:
+                logging.warning(f"[OpenOrdersReporting] Missing required columns: {missing_columns}. Processing may be incomplete.")
+                # Continue anyway with available columns
+            
             # 1. FIRST - Apply deduplication based on product code configuration
             # This now calls the _remove_duplicates_by_customer which in turn calls the enhanced _remove_duplicates
             rows_before_customer_dedup = len(main_df)
@@ -383,6 +394,9 @@ class OpenOrdersReporting:
                 else: # If no product_dataframes, this is the main consolidated file
                     others_filename = f"OOR {today_filename_fmt}.csv"
                     
+                # Sanitize the filename to avoid filesystem issues
+                others_filename = self._sanitize_filename(others_filename)
+                    
                 others_path = f"{processed_date_dir}/{others_filename}"
                 others_bytes = self._dataframe_to_csv_bytes(remaining_df)
                 
@@ -404,6 +418,10 @@ class OpenOrdersReporting:
                 # Get customer name from processing rules
                 customer_name = self.processing_rules[product_code].get('customer_name', product_code)
                 product_filename = f"{customer_name} OOR {today_filename_fmt}.csv" # Added OOR for consistency
+                
+                # Sanitize the filename to avoid filesystem issues
+                product_filename = self._sanitize_filename(product_filename)
+                
                 product_path = f"{processed_date_dir}/{product_filename}"
                 product_bytes = self._dataframe_to_csv_bytes(product_df)
                 
@@ -600,4 +618,45 @@ class OpenOrdersReporting:
         
         # Otherwise return the whole string
         return product_num
+
+    def _validate_product_codes(self):
+        """
+        Validate product codes to ensure no overlapping prefixes exist
+        that could cause incorrect file separation.
+        """
+        separate_file_codes = sorted([pc for pc in self.processing_rules 
+                                     if self.processing_rules[pc].get('create_separate_file', False)],
+                                     key=len, reverse=True)
+        
+        if not separate_file_codes:
+            logging.info("[OpenOrdersReporting] No product codes configured for separate files.")
+            return
+            
+        # Check for overlapping prefixes
+        for i, code1 in enumerate(separate_file_codes):
+            for code2 in separate_file_codes[i+1:]:
+                if code2.startswith(code1) or code1.startswith(code2):
+                    logging.warning(f"[OpenOrdersReporting] Found potentially overlapping product codes: '{code1}' and '{code2}'. This may cause unexpected file separation behavior.")
+        
+        logging.info(f"[OpenOrdersReporting] Validated {len(separate_file_codes)} product codes for separate files")
+        
+    def _sanitize_filename(self, filename: str) -> str:
+        """
+        Sanitize a filename to ensure it's valid for the filesystem.
+        Removes/replaces invalid characters.
+        """
+        # Define characters to replace
+        invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
+        sanitized = filename
+        
+        # Replace invalid characters with underscores
+        for char in invalid_chars:
+            sanitized = sanitized.replace(char, '_')
+            
+        # Ensure filename doesn't exceed max length (255 is common limit)
+        if len(sanitized) > 250:  # Use 250 to be safe
+            base, ext = os.path.splitext(sanitized)
+            sanitized = base[:250-len(ext)] + ext
+            
+        return sanitized
 
