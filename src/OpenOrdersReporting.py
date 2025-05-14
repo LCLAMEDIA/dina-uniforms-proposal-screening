@@ -584,6 +584,14 @@ class OpenOrdersReporting:
                             parsed_date = date_issued_val.date()
                         elif isinstance(date_issued_val, datetime.date): # If it's already a date object
                             parsed_date = date_issued_val
+                        elif isinstance(date_issued_val, (int, float)): # Handle Excel numeric dates (like 45749)
+                            try:
+                                # Excel dates are days since 1899-12-30 (with some quirks)
+                                parsed_date_ts = pd.to_datetime(date_issued_val, unit='D', origin='1899-12-30')
+                                parsed_date = parsed_date_ts.date()
+                            except Exception as ex:
+                                parsed_date = None
+                                logging.warning(f"[OpenOrdersReporting._apply_processing] Could not convert numeric date '{date_issued_val}': {str(ex)}")
                         else:
                             parsed_date = None
                             logging.warning(f"[OpenOrdersReporting._apply_processing] DateIssued '{date_issued_val}' is of unhandled type {type(date_issued_val)}.")
