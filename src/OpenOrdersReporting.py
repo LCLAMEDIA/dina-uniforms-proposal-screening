@@ -142,7 +142,8 @@ class OpenOrdersReporting:
             logging.warning("[OpenOrdersReporting._remove_duplicates] 'Note' column not found. Deduplication might be less accurate.")
         
         # Add other optional key columns if they exist
-        for col_name in ['QID', 'PurchaseNumber', 'barcodeupc']: # barcodeupc can also be useful
+        # In the next update will implement Dynamc Sheet mappings for this values
+        for col_name in ['QID', 'PurchaseNumber', 'barcodeupc', 'Vendor', 'Suppliers', 'OurRef']: # Added new potential columns
             if col_name in processed_df.columns:
                 actual_composite_key_cols.append(col_name)
             else:
