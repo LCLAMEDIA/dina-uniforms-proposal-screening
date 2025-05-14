@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 import csv
 from typing import Dict, List, Tuple, Any
+import re # Added for regex operations
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
@@ -15,6 +16,15 @@ class OpenOrdersReporting:
     A class for processing Open Order Reports and saving them to SharePoint.
     Based on the original OOR processing script with SharePoint integration.
     """
+
+    # Define constants for derived column names for clarity
+    NORMALIZED_ITEM_DESC_COL = '_NormalizedItemDescription'
+    PARSED_NOTE_ID_COL = '_ParsedNoteID'
+
+    # Define base columns for the composite key. This can be expanded.
+    # QID, PurchaseNumber, itemDescription (normalized), Note (parsed) will be added if present.
+    COMPOSITE_KEY_BASE_COLS = ['Order', 'ProductNum']
+
 
     def __init__(self):
         logging.info("[OpenOrdersReporting] Initializing OpenOrdersReporting")
@@ -34,8 +44,6 @@ class OpenOrdersReporting:
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
         self.dedup_customers = self.config_reader.get_dedup_customers()
         
-
-
         # Create processing rules from configuration data
         self.processing_rules = {}
         for product_code, customer_name in self.product_num_mapping.items():
@@ -64,8 +72,180 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
         logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
     
+    def _normalize_string(self, value: Any) -> str:
+        """
+        Normalizes a string value by stripping whitespace and converting to uppercase.
+        Handles non-string inputs by converting them to string first.
+        """
+        if pd.isna(value):
+            return "N/A_VAL" # Consistent placeholder for NaN to be part of a key
+        if not isinstance(value, str):
+            value = str(value)
+        return value.strip().upper()
+
+    def _parse_note_for_id(self, note_text: Any) -> str:
+        """
+        Parses a note string to extract a relevant identifier.
+        This is a simplified example; real-world parsing might be more complex.
+        Normalizes the extracted ID.
+        """
+        if pd.isna(note_text) or not isinstance(note_text, str) or not note_text.strip():
+            return "N/A_NOTE_ID" # Consistent placeholder for missing/empty notes
         
-    # Update to the process_excel_file method to use the enhanced deduplication
+        # Example: take the part before the first comma or pipe, then normalize.
+        # This regex needs to be tailored to the actual data patterns in 'Note'.
+        match = re.match(r"([^,|]+)", note_text.strip())
+        if match:
+            return self._normalize_string(match.group(1))
+        return self._normalize_string(note_text.strip()) # Fallback if no delimiter found
+
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Enhanced duplicate removal using a composite key, normalization, and sorting.
+        Keeps the latest record based on 'DateIssued' if duplicates are found.
+        
+        Args:
+            df: DataFrame to process.
+            
+        Returns:
+            DataFrame with duplicates removed based on the enhanced logic.
+        """
+        if df.empty:
+            logging.info("[OpenOrdersReporting._remove_duplicates] Input DataFrame is empty, skipping deduplication.")
+            return df
+            
+        before_count = len(df)
+        logging.info(f"[OpenOrdersReporting._remove_duplicates] Starting enhanced deduplication. Rows before: {before_count}")
+        
+        # Create a working copy for adding normalized/parsed columns
+        processed_df = df.copy()
+        
+        # --- Prepare columns for composite key ---
+        actual_composite_key_cols = list(self.COMPOSITE_KEY_BASE_COLS) # Start with base columns
+
+        # Normalize 'itemDescription' if it exists
+        if 'itemDescription' in processed_df.columns:
+            processed_df[self.NORMALIZED_ITEM_DESC_COL] = processed_df['itemDescription'].apply(self._normalize_string)
+            actual_composite_key_cols.append(self.NORMALIZED_ITEM_DESC_COL)
+        else:
+            logging.warning("[OpenOrdersReporting._remove_duplicates] 'itemDescription' column not found. Deduplication might be less accurate.")
+
+        # Parse 'Note' field if it exists
+        if 'Note' in processed_df.columns:
+            processed_df[self.PARSED_NOTE_ID_COL] = processed_df['Note'].apply(self._parse_note_for_id)
+            actual_composite_key_cols.append(self.PARSED_NOTE_ID_COL)
+        else:
+            logging.warning("[OpenOrdersReporting._remove_duplicates] 'Note' column not found. Deduplication might be less accurate.")
+        
+        # Add other optional key columns if they exist
+        for col_name in ['QID', 'PurchaseNumber', 'barcodeupc']: # barcodeupc can also be useful
+            if col_name in processed_df.columns:
+                actual_composite_key_cols.append(col_name)
+            else:
+                logging.info(f"[OpenOrdersReporting._remove_duplicates] Optional key column '{col_name}' not found. Skipping for composite key.")
+        
+        # Ensure all columns in actual_composite_key_cols exist in processed_df before using them
+        # This is more of a safeguard; they should exist if added above or are base.
+        final_key_cols_for_drop = [col for col in actual_composite_key_cols if col in processed_df.columns]
+        if not final_key_cols_for_drop:
+            logging.warning("[OpenOrdersReporting._remove_duplicates] No valid key columns found for deduplication. Returning original DataFrame.")
+            return df
+        
+        logging.info(f"[OpenOrdersReporting._remove_duplicates] Using composite key columns: {final_key_cols_for_drop}")
+
+        # --- Sort to keep the latest record ---
+        # Sort by 'DateIssued' (descending) if available. Add other tie-breakers if needed.
+        # Pandas handles NaT in sorting.
+        if 'DateIssued' in processed_df.columns:
+            logging.info("[OpenOrdersReporting._remove_duplicates] Sorting by 'DateIssued' (descending) to keep the latest record among duplicates.")
+            # Ensure DateIssued is datetime for proper sorting, handle errors gracefully
+            processed_df['DateIssued'] = pd.to_datetime(processed_df['DateIssued'], errors='coerce')
+            processed_df.sort_values(by=['DateIssued'], ascending=[False], inplace=True, na_position='last')
+        else:
+            logging.warning("[OpenOrdersReporting._remove_duplicates] 'DateIssued' column not found. Cannot sort to keep latest; will keep first encountered.")
+
+        # --- Drop duplicates based on the composite key ---
+        # `keep='first'` on the sorted DataFrame retains the latest entry.
+        # Pandas' drop_duplicates handles NaN values in subset columns correctly (NaN == NaN is true for this purpose).
+        df_deduped_processed = processed_df.drop_duplicates(subset=final_key_cols_for_drop, keep='first')
+        
+        after_count = len(df_deduped_processed)
+        removed_count = before_count - after_count # Note: this counts based on original 'before_count' of the input df slice
+        
+        if removed_count > 0:
+            logging.info(f"[OpenOrdersReporting._remove_duplicates] Enhanced deduplication removed {removed_count} rows.")
+        else:
+            logging.info("[OpenOrdersReporting._remove_duplicates] No duplicate rows removed by enhanced deduplication.")
+        logging.info(f"[OpenOrdersReporting._remove_duplicates] Rows after enhanced deduplication: {after_count}")
+        
+        # Return original rows corresponding to the kept indices from the processed DataFrame
+        # This preserves original casing and formatting for non-key columns.
+        original_indices_to_keep = df_deduped_processed.index
+        result_df = df.loc[original_indices_to_keep].copy() # Use .loc for safety with potentially non-unique indices if df wasn't reset
+        
+        return result_df
+
+    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Identifies data segments for customers configured for deduplication and applies
+        the enhanced deduplication logic to those segments.
+        
+        Args:
+            df: DataFrame to process.
+            
+        Returns:
+            DataFrame with duplicates removed for configured product codes/customers.
+        """
+        if df.empty:
+            return df
+        
+        # Check if 'ProductNum' column exists, essential for this logic
+        if 'ProductNum' not in df.columns:
+            logging.warning("[OpenOrdersReporting._remove_duplicates_by_customer] 'ProductNum' column not found. Skipping customer-specific deduplication.")
+            return df
+        
+        # Identify product codes that are configured for deduplication
+        # self.dedup_customers stores product codes (e.g., 'SAK') that require deduplication
+        product_codes_requiring_dedup = [pc for pc in self.dedup_customers if pc in self.processing_rules and self.processing_rules[pc].get('remove_duplicates', False)]
+
+        if not product_codes_requiring_dedup:
+            logging.info("[OpenOrdersReporting._remove_duplicates_by_customer] No customers/product codes configured for deduplication. Skipping.")
+            return df
+        
+        logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Performing deduplication for product codes: {product_codes_requiring_dedup}")
+        
+        # Create a combined mask for all rows that belong to products needing deduplication
+        combined_mask_for_dedup_products = pd.Series(False, index=df.index)
+        for product_code in product_codes_requiring_dedup:
+            # Match exact product code or product code as a prefix (e.g., SAK and SAK-123)
+            exact_match = df['ProductNum'] == product_code
+            prefix_match = df['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
+            current_product_mask = exact_match | prefix_match
+            combined_mask_for_dedup_products = combined_mask_for_dedup_products | current_product_mask
+        
+        # Split DataFrame into parts: one that needs deduplication, one that doesn't
+        df_to_deduplicate_segment = df[combined_mask_for_dedup_products].copy()
+        df_no_deduplication_needed_segment = df[~combined_mask_for_dedup_products].copy()
+        
+        deduplicated_segment = pd.DataFrame() # Initialize empty DataFrame for the deduplicated part
+
+        if not df_to_deduplicate_segment.empty:
+            logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Applying enhanced deduplication to {len(df_to_deduplicate_segment)} rows from configured products.")
+            # Apply the enhanced _remove_duplicates method to the identified segment
+            deduplicated_segment = self._remove_duplicates(df_to_deduplicate_segment)
+            logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Rows in segment after deduplication: {len(deduplicated_segment)}. "
+                         f"Removed: {len(df_to_deduplicate_segment) - len(deduplicated_segment)}")
+        else:
+            logging.info("[OpenOrdersReporting._remove_duplicates_by_customer] No rows found for products configured for deduplication.")
+            
+        # Concatenate the deduplicated segment (if any) with the segment that didn't need deduplication
+        if not deduplicated_segment.empty:
+            final_df = pd.concat([deduplicated_segment, df_no_deduplication_needed_segment], ignore_index=True)
+        else: # If deduplicated_segment is empty (either no rows to dedup or all were deduped to empty)
+            final_df = df_no_deduplication_needed_segment.copy()
+
+        logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Total rows after customer-specific deduplication pass: {len(final_df)}")
+        return final_df.reset_index(drop=True) # Reset index for clean DataFrame
 
     def process_excel_file(self, excel_file_bytes: bytes, filename: str = None) -> Dict[str, Any]:
         """
@@ -88,7 +268,7 @@ class OpenOrdersReporting:
             'input_file': filename,
             'total_rows': 0,
             'filtered_brand_rows': 0,
-            'duplicate_rows_removed': 0,
+            'duplicate_rows_removed_by_customer_logic': 0, # Renamed for clarity
             'output_files': {},
             'product_counts': {},
             'start_time': datetime.now(),
@@ -119,17 +299,19 @@ class OpenOrdersReporting:
             product_num_column = 'ProductNum'  # Key column for filtering
             
             # 1. FIRST - Apply deduplication based on product code configuration
-            before_dedup_count = len(main_df)
+            # This now calls the _remove_duplicates_by_customer which in turn calls the enhanced _remove_duplicates
+            rows_before_customer_dedup = len(main_df)
             main_df = self._remove_duplicates_by_customer(main_df)
-            after_dedup_count = len(main_df)
-            stats['duplicate_rows_removed'] = before_dedup_count - after_dedup_count
-            logging.info(f"[OpenOrdersReporting] Total duplicates removed: {stats['duplicate_rows_removed']}")
+            rows_after_customer_dedup = len(main_df)
+            stats['duplicate_rows_removed_by_customer_logic'] = rows_before_customer_dedup - rows_after_customer_dedup
+            logging.info(f"[OpenOrdersReporting] Total duplicates removed by customer-specific logic: {stats['duplicate_rows_removed_by_customer_logic']}")
             
             # 2. SECOND - Filter out brands from the official brands list
             if product_num_column in main_df.columns:
                 former_customers_mask = pd.Series(False, index=main_df.index)
                 for brand in self.official_brands:
                     brand_prefix = f"{brand}-"
+                    # Ensure ProductNum is string for startswith
                     prefix_mask = main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False)
                     if prefix_mask.any():
                         former_customers_mask = former_customers_mask | prefix_mask
@@ -162,10 +344,10 @@ class OpenOrdersReporting:
                     if product_mask.any():
                         # Extract matching rows to a separate dataframe
                         product_df = remaining_df[product_mask].copy()
-                        product_df = self._add_checking_customer_columns(product_df)
+                        product_df = self._add_checking_customer_columns(product_df) # Add columns before specific processing
                         
                         # Apply customer name mapping
-                        product_df = self._apply_processing(product_df, product_code)
+                        product_df = self._apply_processing(product_df, rule.get('customer_name', product_code)) # Use mapped name
                         
                         # Add to the product dataframes dictionary
                         product_dataframes[product_code] = product_df
@@ -175,11 +357,11 @@ class OpenOrdersReporting:
                         
                         # Remove from the main dataframe
                         remaining_df = remaining_df[~product_mask].copy()
-                        logging.info(f"[OpenOrdersReporting] Separated {len(product_df)} {product_code} rows")
+                        logging.info(f"[OpenOrdersReporting] Separated {len(product_df)} rows for {product_code} (Customer: {rule.get('customer_name', product_code)})")
             
             # 5. FIFTH - Process the remaining data
             # Apply customer/checking note processing to remaining dataframe
-            remaining_df = self._apply_processing(remaining_df, "OTHERS")
+            remaining_df = self._apply_processing(remaining_df, "OTHERS") # Pass "OTHERS" as df_name
             stats['remaining_rows'] = len(remaining_df)
             
             # 6. SIXTH - Prepare for output
@@ -196,9 +378,9 @@ class OpenOrdersReporting:
             # 7. SEVENTH - Upload main file if it's not empty
             if not remaining_df.empty:
                 # Check if we're generating separate files or just one main file
-                if product_dataframes:
+                if product_dataframes: # If product_dataframes has entries, this is the "OTHERS" file
                     others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
-                else:
+                else: # If no product_dataframes, this is the main consolidated file
                     others_filename = f"OOR {today_filename_fmt}.csv"
                     
                 others_path = f"{processed_date_dir}/{others_filename}"
@@ -212,7 +394,7 @@ class OpenOrdersReporting:
                     file_bytes=others_bytes,
                     content_type="text/csv"
                 )
-                stats['output_files']['main'] = others_filename
+                stats['output_files']['main_or_others'] = others_filename # Clarified key
             
             # 8. EIGHTH - Upload product-specific files
             for product_code, product_df in product_dataframes.items():
@@ -221,7 +403,7 @@ class OpenOrdersReporting:
                     
                 # Get customer name from processing rules
                 customer_name = self.processing_rules[product_code].get('customer_name', product_code)
-                product_filename = f"{customer_name} {today_filename_fmt}.csv"
+                product_filename = f"{customer_name} OOR {today_filename_fmt}.csv" # Added OOR for consistency
                 product_path = f"{processed_date_dir}/{product_filename}"
                 product_bytes = self._dataframe_to_csv_bytes(product_df)
                 
@@ -233,119 +415,26 @@ class OpenOrdersReporting:
                     file_bytes=product_bytes, 
                     content_type="text/csv"
                 )
-                stats['output_files'][product_code] = product_filename
+                stats['output_files'][customer_name] = product_filename # Use customer_name as key for stats
             
             # Finalize stats
             stats['success'] = True
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
             
-            logging.info(f"[OpenOrdersReporting] Processing completed in {stats['duration']:.2f} seconds")
+            logging.info(f"[OpenOrdersReporting] Processing completed in {stats['duration']:.2f} seconds. Stats: {stats}")
             
             return stats
             
         except Exception as e:
-            logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}")
-            raise
-    
-    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Enhanced duplicate removal that properly compares all columns.
-        This considers all columns after stripping whitespace to determine if rows are truly duplicates.
-        
-        Args:
-            df: DataFrame to process
-            
-        Returns:
-            DataFrame with duplicates removed
-        """
-        if df.empty:
-            return df
-            
-        # Get the row count before deduplication
-        before_count = len(df)
-        
-        # Create a copy to avoid modifying the original
-        processed_df = df.copy()
-        
-        # Process string columns to strip whitespace
-        for col in processed_df.columns:
-            if processed_df[col].dtype == 'object':  # Only process string columns
-                processed_df[col] = processed_df[col].astype(str).str.strip()
-        
-        # Drop exact duplicates (comparing all columns)
-        # This will only remove rows that are exact duplicates across ALL columns
-        df_deduped = processed_df.drop_duplicates(keep='first')
-        
-        # Get row count after deduplication
-        after_count = len(df_deduped)
-        removed_count = before_count - after_count
-        
-        if removed_count > 0:
-            logging.info(f"[OpenOrdersReporting] Removed {removed_count} exact duplicate rows (all columns compared)")
-        
-        # Map back the indices to the original dataframe
-        # We need to preserve the original data (not the whitespace-stripped version)
-        original_indices = df_deduped.index
-        result_df = df.iloc[original_indices].copy()
-        
-        return result_df
-
-    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Remove duplicate orders based on customer configuration.
-        Only applies to product codes configured for deduplication.
-        Compares all columns to determine if rows are truly duplicates.
-        
-        Args:
-            df: DataFrame to process
-            
-        Returns:
-            DataFrame with duplicates removed for configured product codes
-        """
-        if df.empty or 'ProductNum' not in df.columns:
-            return df
-        
-        # Track product codes that need deduplication
-        dedup_product_codes = []
-        for code, rule in self.processing_rules.items():
-            if rule.get('remove_duplicates', False):
-                dedup_product_codes.append(code)
-        
-        # Skip if no products need deduplication
-        if not dedup_product_codes:
-            return df
-        
-        logging.info(f"[OpenOrdersReporting] Performing deduplication for product codes: {dedup_product_codes}")
-        
-        # Create masks for each product code that needs deduplication
-        dedup_masks = {}
-        for code in dedup_product_codes:
-            # Match both exact code and code-prefixed values
-            exact_match = df['ProductNum'] == code
-            prefix_match = df['ProductNum'].astype(str).str.startswith(f"{code}-", na=False)
-            dedup_masks[code] = exact_match | prefix_match
-        
-        # Combine all product code masks
-        combined_mask = pd.Series(False, index=df.index)
-        for mask in dedup_masks.values():
-            combined_mask = combined_mask | mask
-        
-        # Split dataframe into parts that need deduplication and parts that don't
-        to_dedup_df = df[combined_mask].copy()
-        no_dedup_df = df[~combined_mask].copy()
-        
-        # Apply deduplication to the part that needs it
-        if not to_dedup_df.empty:
-            deduped_df = self._remove_duplicates(to_dedup_df)
-            logging.info(f"[OpenOrdersReporting] Removed {len(to_dedup_df) - len(deduped_df)} duplicates from products configured for deduplication")
-            
-            # Combine the deduped part with the part that didn't need deduplication
-            result_df = pd.concat([deduped_df, no_dedup_df])
-            return result_df
-        
-        # If nothing to deduplicate, return original dataframe
-        return df
+            logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}", exc_info=True) # Added exc_info for traceback
+            # Populate stats with error info
+            stats['success'] = False
+            stats['error_message'] = str(e)
+            stats['end_time'] = datetime.now()
+            if 'start_time' in stats: # Ensure start_time was set
+                stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
+            raise # Re-raise the exception after logging
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
@@ -360,38 +449,46 @@ class OpenOrdersReporting:
         csv_content = buffer.getvalue()
         
         # Log the first line to verify header structure
-        header_line = csv_content.split('\n')[0] if '\n' in csv_content else csv_content
-        logging.info(f"[OpenOrdersReporting] CSV header line: {header_line}")
+        if '\n' in csv_content:
+            header_line = csv_content.split('\n', 1)[0]
+            logging.info(f"[OpenOrdersReporting] CSV header line for export: {header_line}")
         
         return csv_content.encode('utf-8')
     
     def _add_checking_customer_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add 'CHECKING NOTE' and 'CUSTOMER' columns to the dataframe."""
+        """Add 'CHECKING NOTE' and 'CUSTOMER' columns to the dataframe if they don't exist, ensuring correct order."""
         modified_df = df.copy()
         
-        # Remove any Unnamed columns that might have been created
-        unnamed_cols = [col for col in modified_df.columns if 'Unnamed' in str(col)]
-        if unnamed_cols:
-            logging.info(f"[OpenOrdersReporting] Removing unnamed columns before adding CHECKING NOTE and CUSTOMER: {unnamed_cols}")
-            modified_df = modified_df.drop(columns=unnamed_cols)
+        # Define desired column order for the first two columns
+        desired_first_cols = ['CHECKING NOTE', 'CUSTOMER']
         
-        # Ensure CHECKING NOTE is the first column
-        if 'CHECKING NOTE' not in modified_df.columns:
+        # Get existing columns
+        current_cols = list(modified_df.columns)
+        
+        # Columns to prepend if they are missing
+        cols_to_add_at_front = []
+
+        # Check for CUSTOMER (should be second)
+        if 'CUSTOMER' not in current_cols:
+            modified_df.insert(0, 'CUSTOMER', '') # Insert temporarily at 0, will be pushed by CHECKING NOTE
+            current_cols.insert(0, 'CUSTOMER') # Reflect in current_cols for next check
+        
+        # Check for CHECKING NOTE (should be first)
+        if 'CHECKING NOTE' not in current_cols:
             modified_df.insert(0, 'CHECKING NOTE', '')
-        elif list(modified_df.columns).index('CHECKING NOTE') != 0:
-            cols = list(modified_df.columns)
-            cols.remove('CHECKING NOTE')
-            cols.insert(0, 'CHECKING NOTE')
-            modified_df = modified_df[cols]
         
-        # Ensure CUSTOMER is the second column
-        if 'CUSTOMER' not in modified_df.columns:
-            modified_df.insert(1, 'CUSTOMER', '')
-        elif list(modified_df.columns).index('CUSTOMER') != 1:
-            cols = list(modified_df.columns)
-            cols.remove('CUSTOMER')
-            cols.insert(1, 'CUSTOMER')
-            modified_df = modified_df[cols]
+        # Reorder to ensure CHECKING NOTE is first, CUSTOMER is second, then others
+        final_cols_order = []
+        if 'CHECKING NOTE' in modified_df.columns:
+            final_cols_order.append('CHECKING NOTE')
+        if 'CUSTOMER' in modified_df.columns:
+            final_cols_order.append('CUSTOMER')
+        
+        for col in modified_df.columns:
+            if col not in final_cols_order:
+                final_cols_order.append(col)
+                
+        modified_df = modified_df[final_cols_order]
         
         return modified_df
     
@@ -400,83 +497,102 @@ class OpenOrdersReporting:
         if df_to_process.empty:
             return df_to_process
         
+        # Ensure 'CUSTOMER' and 'CHECKING NOTE' columns exist from _add_checking_customer_columns
+        # df_to_process = self._add_checking_customer_columns(df_to_process) # Already called before this in main flow
+
         product_num_column = 'ProductNum'
-        # taskqueue_column = 'TaskQueue'  # Commented out as not needed
         date_issued_column = 'DateIssued'
         
         # --- Customer Name Population ---
-        if df_name == "CALVARY":
-            df_to_process['CUSTOMER'] = 'CALVARY'
-        elif df_name == "FORMER CUSTOMERS":
+        # df_name is now the target customer name for specific files (e.g. "CALVARY") or "OTHERS"
+        if df_name != "OTHERS" and df_name in self.product_num_mapping.values(): # If df_name is a mapped customer name
+             df_to_process['CUSTOMER'] = df_name
+        elif df_name == "FORMER CUSTOMERS": # This case might be redundant if official_brands are filtered out earlier
             if product_num_column in df_to_process.columns:
                 for index, row in df_to_process.iterrows():
                     product_num_val = row.get(product_num_column)
                     if pd.notna(product_num_val):
-                        product_num = str(product_num_val)
-                        brand_prefix = product_num.split('-')[0] if '-' in product_num else product_num
-                        if brand_prefix in self.official_brands:
-                            df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping.get(brand_prefix, brand_prefix)
-        elif product_num_column in df_to_process.columns:  # For OTHERS and GENERIC
+                        product_num_str = str(product_num_val)
+                        brand_prefix = product_num_str.split('-')[0] if '-' in product_num_str else product_num_str
+                        if brand_prefix in self.official_brands: # official_brands contains product codes like 'BIS'
+                             df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping.get(brand_prefix, brand_prefix)
+        elif product_num_column in df_to_process.columns:  # For OTHERS, try to map based on ProductNum
             for index, row in df_to_process.iterrows():
-                product_num_val = row.get(product_num_column)
-                if pd.notna(product_num_val):
-                    product_num = str(product_num_val)
-                    if product_num in self.product_num_mapping:
-                        df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping[product_num]
-                        continue
-                    matched = False
-                    for prefix, value in self.product_num_mapping.items():
-                        if product_num.startswith(prefix + '-') or product_num.startswith(prefix):
-                            df_to_process.at[index, 'CUSTOMER'] = value
-                            matched = True
-                            break
-                    if not matched and product_num.startswith('SAK-'):
-                        df_to_process.at[index, 'CUSTOMER'] = 'SHARKS AT KARELLA'
-        
-        # --- CHECKING NOTE Population (TaskQueue ONLY) --- 
-        # Commented out as not needed
-        # if taskqueue_column in df_to_process.columns:
-        #     for task_value, note_value in self.taskqueue_mapping.items():
-        #         mask = df_to_process[taskqueue_column].astype(str) == str(task_value)
-        #         if mask.any():
-        #             # Apply note based on TaskQueue match
-        #             df_to_process.loc[mask, 'CHECKING NOTE'] = note_value
-        
+                # Only attempt to fill CUSTOMER if it's currently empty or matches a generic placeholder
+                current_customer = str(row.get('CUSTOMER', '')).strip()
+                if current_customer == '' or current_customer == 'OTHERS' or current_customer.startswith('N/A'):
+                    product_num_val = row.get(product_num_column)
+                    if pd.notna(product_num_val):
+                        product_num_str = str(product_num_val)
+                        # Exact match for ProductNum in mapping
+                        if product_num_str in self.product_num_mapping:
+                            df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping[product_num_str]
+                            continue
+                        # Prefix match for ProductNum in mapping (e.g. SAK-123 matches SAK)
+                        matched_by_prefix = False
+                        for prefix_key, customer_value in self.product_num_mapping.items():
+                            if product_num_str.startswith(prefix_key + "-") or product_num_str == prefix_key:
+                                df_to_process.at[index, 'CUSTOMER'] = customer_value
+                                matched_by_prefix = True
+                                break
+                        # Fallback for SAK if not specifically mapped but ProductNum starts with SAK-
+                        if not matched_by_prefix and product_num_str.startswith('SAK-') and 'SAK' not in self.product_num_mapping:
+                             df_to_process.at[index, 'CUSTOMER'] = 'SHARKS AT KARELLA' # Default if SAK is not in mapping
+                        elif not matched_by_prefix and current_customer == '': # If still no match, mark as OTHERS explicitly
+                             df_to_process.at[index, 'CUSTOMER'] = 'OTHERS'
+
+
         # --- Add < 5 DAYS OLD checking note based on DateIssued ---
         if date_issued_column in df_to_process.columns:
-            today = datetime.now().date()
+            today = datetime.now().date() # Use .now().date() for date comparison
             
             for index, row in df_to_process.iterrows():
                 date_issued_val = row.get(date_issued_column)
                 
                 if pd.notna(date_issued_val):
                     try:
-                        # Parse the date in DD/MM/YYYY format
+                        # Attempt to parse date_issued_val if it's a string
                         if isinstance(date_issued_val, str):
-                            date_issued = datetime.strptime(date_issued_val, "%d/%m/%Y").date()
+                            # Try common formats; extend this list if necessary
+                            parsed_date = None
+                            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+                                try:
+                                    parsed_date = datetime.strptime(date_issued_val, fmt).date()
+                                    break
+                                except ValueError:
+                                    continue
+                            if parsed_date is None and hasattr(pd.to_datetime(date_issued_val, errors='coerce'), 'date'): # Pandas to_datetime as fallback
+                                parsed_date = pd.to_datetime(date_issued_val, errors='coerce').date()
+
+                        elif hasattr(date_issued_val, 'date'): # If it's already a datetime-like object (Timestamp)
+                            parsed_date = date_issued_val.date()
+                        elif isinstance(date_issued_val, datetime.date): # If it's already a date object
+                            parsed_date = date_issued_val
                         else:
-                            # If it's already a datetime or timestamp
-                            date_issued = date_issued_val.date() if hasattr(date_issued_val, 'date') else date_issued_val
-                        
-                        # Calculate days difference
-                        days_diff = (today - date_issued).days
-                        
-                        # Apply the checking note if less than 5 days old
-                        if days_diff < 5:
-                            current_note = row.get('CHECKING NOTE', '')
-                            if current_note:
-                                df_to_process.at[index, 'CHECKING NOTE'] = f"{current_note} < 5 DAYS OLD"
-                            else:
-                                df_to_process.at[index, 'CHECKING NOTE'] = "< 5 DAYS OLD"
-                    
-                    except (ValueError, TypeError) as e:
-                        # Log but don't raise exception for date parsing errors
-                        logging.warning(f"[OpenOrdersReporting] Error parsing date '{date_issued_val}': {str(e)}")
+                            parsed_date = None
+                            logging.warning(f"[OpenOrdersReporting._apply_processing] DateIssued '{date_issued_val}' is of unhandled type {type(date_issued_val)}.")
+
+                        if parsed_date and isinstance(parsed_date, datetime.date): # Check if parsed_date is a valid date object
+                            days_diff = (today - parsed_date).days
+                            if days_diff < 5 and days_diff >= 0: # Also ensure it's not a future date
+                                current_note = str(row.get('CHECKING NOTE', '')).strip()
+                                new_suffix = "< 5 DAYS OLD"
+                                if new_suffix not in current_note: # Avoid duplicate suffixes
+                                    if current_note:
+                                        df_to_process.at[index, 'CHECKING NOTE'] = f"{current_note} {new_suffix}"
+                                    else:
+                                        df_to_process.at[index, 'CHECKING NOTE'] = new_suffix
+                        elif parsed_date is None and isinstance(date_issued_val, str) : # if original was string and parsing failed
+                             logging.warning(f"[OpenOrdersReporting._apply_processing] Could not parse DateIssued string '{date_issued_val}' for < 5 DAYS OLD check.")
+
+                    except Exception as e: # Catch broader exceptions during date processing
+                        logging.warning(f"[OpenOrdersReporting._apply_processing] Error processing DateIssued '{date_issued_val}' for < 5 DAYS OLD check: {str(e)}")
         
         return df_to_process
     
     def _extract_product_code(self, product_num: str) -> str:
-        """Extract the product code from a product number."""
+        """Extract the product code from a product number (e.g., 'SAK' from 'SAK-XYZ')."""
+        # This method is kept for potential utility but is not directly used by the new deduplication logic.
         if not product_num or not isinstance(product_num, str):
             return ""
         
@@ -487,47 +603,3 @@ class OpenOrdersReporting:
         # Otherwise return the whole string
         return product_num
 
-    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove duplicate orders based on customer configuration."""
-        if df.empty or 'Order' not in df.columns or 'ProductNum' not in df.columns:
-            return df
-        
-        # Skip if no customers need deduplication
-        if not self.dedup_customers:
-            return df
-        
-        logging.info(f"[OpenOrdersReporting] Performing deduplication for customers: {self.dedup_customers}")
-        
-        # Track seen orders per customer
-        seen_orders = {}
-        rows_to_drop = []
-        
-        # Group by Order to find duplicates
-        order_groups = df.groupby('Order')
-        
-        for order_id, order_group in order_groups:
-            if len(order_group) <= 1:
-                continue  # No duplicates for this order
-            
-            # Keep track of customer codes seen for this order
-            order_customer_codes = set()
-            
-            # Process each row in this order group
-            for idx, row in order_group.iterrows():
-                product_num = row.get('ProductNum', '')
-                product_code = self._extract_product_code(str(product_num))
-                
-                # If customer needs deduplication and we've seen this customer-order combo
-                if product_code in self.dedup_customers:
-                    if product_code in order_customer_codes:
-                        rows_to_drop.append(idx)
-                    else:
-                        order_customer_codes.add(product_code)
-        
-        # Drop identified duplicate rows
-        if rows_to_drop:
-            result_df = df.drop(rows_to_drop)
-            logging.info(f"[OpenOrdersReporting] Removed {len(rows_to_drop)} duplicate orders")
-            return result_df
-        
-        return df
