@@ -520,7 +520,6 @@ class OpenOrdersReporting:
         # df_to_process = self._add_checking_customer_columns(df_to_process) # Already called before this in main flow
 
         product_num_column = 'ProductNum'
-        date_issued_column = 'DateIssued'
         
         # --- Customer Name Population ---
         # df_name is now the target customer name for specific files (e.g. "CALVARY") or "OTHERS"
@@ -539,7 +538,7 @@ class OpenOrdersReporting:
             for index, row in df_to_process.iterrows():
                 # Only attempt to fill CUSTOMER if it's currently empty or matches a generic placeholder
                 current_customer = str(row.get('CUSTOMER', '')).strip()
-                if current_customer == '' or current_customer == 'OTHERS' or current_customer.startswith('N/A'):
+                if current_customer == '' or current_customer.startswith('N/A'):
                     product_num_val = row.get(product_num_column)
                     if pd.notna(product_num_val):
                         product_num_str = str(product_num_val)
@@ -554,64 +553,6 @@ class OpenOrdersReporting:
                                 df_to_process.at[index, 'CUSTOMER'] = customer_value
                                 matched_by_prefix = True
                                 break
-                        # If not matched by prefix and customer field is empty, mark as OTHERS explicitly
-                        if not matched_by_prefix and current_customer == '': 
-                             df_to_process.at[index, 'CUSTOMER'] = 'OTHERS'
-
-
-        # --- Add < 5 DAYS OLD checking note based on DateIssued ---
-        if date_issued_column in df_to_process.columns:
-            today = datetime.now().date() # Use .now().date() for date comparison
-            
-            for index, row in df_to_process.iterrows():
-                date_issued_val = row.get(date_issued_column)
-                
-                if pd.notna(date_issued_val):
-                    try:
-                        # Attempt to parse date_issued_val if it's a string
-                        if isinstance(date_issued_val, str):
-                            # Try common formats; extend this list if necessary
-                            parsed_date = None
-                            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
-                                try:
-                                    parsed_date = datetime.strptime(date_issued_val, fmt).date()
-                                    break
-                                except ValueError:
-                                    continue
-                            if parsed_date is None and hasattr(pd.to_datetime(date_issued_val, errors='coerce'), 'date'): # Pandas to_datetime as fallback
-                                parsed_date = pd.to_datetime(date_issued_val, errors='coerce').date()
-
-                        elif hasattr(date_issued_val, 'date'): # If it's already a datetime-like object (Timestamp)
-                            parsed_date = date_issued_val.date()
-                        elif isinstance(date_issued_val, datetime.date): # If it's already a date object
-                            parsed_date = date_issued_val
-                        elif isinstance(date_issued_val, (int, float)): # Handle Excel numeric dates (like 45749)
-                            try:
-                                # Excel dates are days since 1899-12-30 (with some quirks)
-                                parsed_date_ts = pd.to_datetime(date_issued_val, unit='D', origin='1899-12-30')
-                                parsed_date = parsed_date_ts.date()
-                            except Exception as ex:
-                                parsed_date = None
-                                logging.warning(f"[OpenOrdersReporting._apply_processing] Could not convert numeric date '{date_issued_val}': {str(ex)}")
-                        else:
-                            parsed_date = None
-                            logging.warning(f"[OpenOrdersReporting._apply_processing] DateIssued '{date_issued_val}' is of unhandled type {type(date_issued_val)}.")
-
-                        if parsed_date and isinstance(parsed_date, datetime.date): # Check if parsed_date is a valid date object
-                            days_diff = (today - parsed_date).days
-                            if days_diff < 5 and days_diff >= 0: # Also ensure it's not a future date
-                                current_note = str(row.get('CHECKING NOTE', '')).strip()
-                                new_suffix = "< 5 DAYS OLD"
-                                if new_suffix not in current_note: # Avoid duplicate suffixes
-                                    if current_note:
-                                        df_to_process.at[index, 'CHECKING NOTE'] = f"{current_note} {new_suffix}"
-                                    else:
-                                        df_to_process.at[index, 'CHECKING NOTE'] = new_suffix
-                        elif parsed_date is None and isinstance(date_issued_val, str) : # if original was string and parsing failed
-                             logging.warning(f"[OpenOrdersReporting._apply_processing] Could not parse DateIssued string '{date_issued_val}' for < 5 DAYS OLD check.")
-
-                    except Exception as e: # Catch broader exceptions during date processing
-                        logging.warning(f"[OpenOrdersReporting._apply_processing] Error processing DateIssued '{date_issued_val}' for < 5 DAYS OLD check: {str(e)}")
         
         return df_to_process
     
