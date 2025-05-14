@@ -535,10 +535,8 @@ class OpenOrdersReporting:
                                 df_to_process.at[index, 'CUSTOMER'] = customer_value
                                 matched_by_prefix = True
                                 break
-                        # Fallback for SAK if not specifically mapped but ProductNum starts with SAK-
-                        if not matched_by_prefix and product_num_str.startswith('SAK-') and 'SAK' not in self.product_num_mapping:
-                             df_to_process.at[index, 'CUSTOMER'] = 'SHARKS AT KARELLA' # Default if SAK is not in mapping
-                        elif not matched_by_prefix and current_customer == '': # If still no match, mark as OTHERS explicitly
+                        # If not matched by prefix and customer field is empty, mark as OTHERS explicitly
+                        if not matched_by_prefix and current_customer == '': 
                              df_to_process.at[index, 'CUSTOMER'] = 'OTHERS'
 
 
