@@ -25,9 +25,7 @@ class OpenOrdersReporting:
     # QID, PurchaseNumber, itemDescription (normalized), Note (parsed) will be added if present.
     COMPOSITE_KEY_BASE_COLS = ['Order', 'ProductNum']
 
-
-    def __init__(self):
-
+    # Define required headers for OOR Excel files
     REQUIRED_OOR_HEADERS = [
         'Order', 'DateIssued', 'VendorPO', 'customerPO', 'Requestor', 'ProductNum', 'barcodeupc',
         'itemDescription', 'Vendors', 'StockOnHand', 'TaskQueue', 'QueueDate', 'DaysInQueue',
