@@ -27,6 +27,100 @@ class OpenOrdersReporting:
 
 
     def __init__(self):
+
+    REQUIRED_OOR_HEADERS = [
+        'Order', 'DateIssued', 'VendorPO', 'customerPO', 'Requestor', 'ProductNum', 'barcodeupc',
+        'itemDescription', 'Vendors', 'StockOnHand', 'TaskQueue', 'QueueDate', 'DaysInQueue',
+        'QtyOrdered', 'QtyPacked', 'QtyRemaining', 'Note', 'itemNote', 'ETADate', 'ShipName',
+        'ShipAddress', 'ShipCity', 'ShipState', 'ShipPostCode', 'TrackingNum', 'DaysOpen',
+        'PurchaseNumber', 'DatePurchase', 'Suppliers', 'OurRef', 'QID', 'QIDDate'
+    ]
+
+    def __init__(self):
+        logging.info("[OpenOrdersReporting] Initializing OpenOrdersReporting")
+        # Initialize Azure and SharePoint connections
+        self.azure_ops = AzureOperations()
+        access_token = self.azure_ops.get_access_token()
+        self.sharepoint_ops = SharePointOperations(access_token=access_token)
+        
+        # Load dynamic configuration
+        self.config_reader = ConfigurationReader(sharepoint_ops=self.sharepoint_ops)
+        config_loaded = self.config_reader.load_configuration()
+        logging.info(f"[OpenOrdersReporting] Configuration loaded: {config_loaded}")
+        
+        # Get configuration values
+        self.official_brands = self.config_reader.get_official_brands()
+        self.product_num_mapping = self.config_reader.get_product_num_mapping()
+        self.separate_file_customers = self.config_reader.get_separate_file_customers()
+        self.dedup_customers = self.config_reader.get_dedup_customers()
+        
+        # Create processing rules from configuration data
+        self.processing_rules = {}
+        for product_code, customer_name in self.product_num_mapping.items():
+            self.processing_rules[product_code] = {
+                'customer_name': customer_name,
+                'create_separate_file': product_code in self.separate_file_customers,
+                'remove_duplicates': product_code in self.dedup_customers
+            }
+        
+        # Validate no overlapping prefixes for separate files
+        self._validate_product_codes()
+        
+        # Add detailed configuration logging
+        logging.info("[OpenOrdersReporting] Loaded configuration values:")
+        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
+        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
+        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
+        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
+        
+        # Configure folder paths based on environment variables
+        self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
+        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
+        self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
+        
+        # After loading configuration values
+        logging.info(f"[OpenOrdersReporting] Loaded configuration values:")
+        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
+        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
+        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
+        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
+        logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
+
+    def validate_oor_file(self, file_bytes: bytes, filename: str) -> tuple:
+        """
+        Validates if the file is an acceptable OOR Excel file for processing.
+        - Checks if the file name contains 'OOR' (case-insensitive, normalized)
+        - Checks if the file is an Excel file (by extension and by reading with pandas)
+        - Checks if the required headers are present in the Excel file
+        Returns (True, '') if valid, else (False, reason)
+        """
+        import os
+        import pandas as pd
+        import io
+
+        # 1. Check if filename contains 'OOR' (case-insensitive, normalized)
+        if 'OOR' not in self._normalize_string(filename):
+            return False, "Filename does not contain 'OOR'"
+
+        # 2. Check if the file is an Excel file by extension
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ['.xlsx', '.xls']:
+            return False, "File is not an Excel file (.xlsx or .xls)"
+
+        # 3. Try to read the Excel file
+        try:
+            excel_file = io.BytesIO(file_bytes)
+            df = pd.read_excel(excel_file)
+        except Exception as e:
+            return False, f"File could not be read as an Excel file: {str(e)}"
+
+        # 4. Check if required headers are present
+        missing_headers = [col for col in self.REQUIRED_OOR_HEADERS if col not in df.columns]
+        if missing_headers:
+            return False, f"Missing required headers: {', '.join(missing_headers)}"
+
+        return True, ''
+
         logging.info("[OpenOrdersReporting] Initializing OpenOrdersReporting")
         # Initialize Azure and SharePoint connections
         self.azure_ops = AzureOperations()
