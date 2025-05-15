@@ -180,60 +180,62 @@ def sharepoint_process_oor():
         
         for file_type, filename in result.get('output_files', {}).items():
             file_count = 0
-            if file_type == 'generic' and 'generic_rows' in result:
-                file_count = int(result.get('generic_rows', 0))
-            elif file_type == 'calvary' and 'calvary_rows' in result:
-                file_count = int(result.get('calvary_rows', 0))
-            elif file_type == 'former_customers' and 'filtered_brand_rows' in result:
-                file_count = int(result.get('filtered_brand_rows', 0))
-            elif (file_type == 'others' or file_type == 'main') and 'remaining_rows' in result:
+            if file_type in result.get('product_counts', {}):
+                file_count = int(result.get('product_counts', {}).get(file_type, 0))
+            elif file_type == 'main_or_others' and 'remaining_rows' in result:
                 file_count = int(result.get('remaining_rows', 0))
             
-            file_info = {
-                "file_type": file_type.capitalize(),
+            output_files_list.append({
+                "file_type": file_type,
                 "filename": filename,
                 "record_count": file_count
-            }
-            output_files_list.append(file_info)
-            output_files_text += f"- {file_type.capitalize()}: {filename} ({file_count} records)\n"
+            })
+            output_files_text += f"- {filename}: {file_count} records\n"
         
-        # Create raw text message
-        raw_message = f"""
-Open Orders Report Processing Complete
-Source File: {file_name}
-Processed On: {today_fmt}
-Processing Time: {round(float(result.get('duration', 0)), 2)} seconds
-Total Records: {int(result.get('total_rows', 0))}
-Duplicates Removed: {int(result.get('duplicate_orders_removed', 0))}
+        # Get information about brands
+        filtered_brands = []
+        if hasattr(oor_ops, 'official_brands'):
+            filtered_brands = oor_ops.official_brands
+        
+        split_brands = []
+        if hasattr(oor_ops, 'separate_file_customers'):
+            split_brands = oor_ops.separate_file_customers
+        
+        # Create concise text message
+        raw_message = f"""OOR Processing Complete
+File: {file_name}
+Date: {today_fmt}
+Time: {round(float(result.get('duration', 0)), 2)}s
+Records: {int(result.get('total_rows', 0))}
+Duplicates Removed: {int(result.get('duplicate_rows_removed_by_customer_logic', 0))}
+Filtered Brands: {int(result.get('filtered_brand_rows', 0))}
 
-Generated Files:
+Files:
 {output_files_text}
-Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/
-"""
+Location: OOR/Processed/{folder_fmt}/"""
         
-        # Create structured response with both raw text and object data
+        # Create concise structured response
         response_data = {
             "success": True,
-            "raw_message": raw_message.strip(),
+            "message": raw_message.strip(),
             "data": {
-                "source_file": file_name,
-                "processed_date": today_fmt,
-                "processing_time_seconds": round(float(result.get('duration', 0)), 2),
-                "total_records": int(result.get('total_rows', 0)),
-                "output_location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/",
-                "counts": {
-                    "generic": int(result.get('generic_rows', 0)),
-                    "calvary": int(result.get('calvary_rows', 0)),
-                    "former_customers": int(result.get('filtered_brand_rows', 0)),
-                    "others": int(result.get('remaining_rows', 0)),
-                    "duplicate_orders_removed": int(result.get('duplicate_orders_removed', 0))
+                "file": file_name,
+                "date": today_fmt,
+                "processing_time": round(float(result.get('duration', 0)), 2),
+                "stats": {
+                    "total": int(result.get('total_rows', 0)),
+                    "duplicates_removed": int(result.get('duplicate_rows_removed_by_customer_logic', 0)),
+                    "filtered_brands_count": int(result.get('filtered_brand_rows', 0)),
+                    "remaining": int(result.get('remaining_rows', 0))
                 },
-                "output_files": output_files_list,
-                "using_configuration": hasattr(oor_ops, 'config_reader') and hasattr(oor_ops.config_reader, 'official_brands')
+                "filtered_brands": filtered_brands,
+                "split_brands": split_brands,
+                "files": output_files_list,
+                "location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/"
             }
         }
         
-        # Return success response with both formats
+        # Return success response
         return jsonify(response_data), 200
         
     except Exception as e:
@@ -242,22 +244,11 @@ Files saved to: Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING 
         logging.error(f"SharePoint OOR processing failed: {str(e)}")
         logging.error(f"Traceback: {error_trace}")
         
-        # Format error message in both formats
-        raw_error = f"""
-Open Orders Report Processing Failed
-Error: {str(e)}
-Time: {datetime.now().strftime("%d-%m-%Y %H:%M:%S")}
-
-Please contact IT support if this error persists.
-"""
-        
+        # Format error message
         error_response = {
-            "error": True,
-            "raw_message": raw_error.strip(),
-            "data": {
-                "error_message": str(e),
-                "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            }
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         }
         
         return jsonify(error_response), 500
