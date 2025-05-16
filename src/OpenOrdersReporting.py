@@ -350,6 +350,9 @@ class OpenOrdersReporting:
         Parameters:
         - excel_file_bytes: The bytes of the Excel file to process
         - filename: The name of the input file
+        
+        Returns:
+        - Dict with processing statistics or error information
         """
         
         logging.info(f"[OpenOrdersReporting] Processing file: {filename}")
@@ -369,6 +372,17 @@ class OpenOrdersReporting:
             'start_time': datetime.now(),
         }
         
+        # Validate the file first
+        is_valid, validation_message = self.validate_oor_file(excel_file_bytes, filename)
+        if not is_valid:
+            logging.warning(f"[OpenOrdersReporting] File validation failed: {validation_message}")
+            stats['success'] = False
+            stats['error_message'] = validation_message
+            stats['error_type'] = 'validation_error'
+            stats['end_time'] = datetime.now()
+            stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
+            return stats
+            
         try:
             # Read the Excel file from bytes
             excel_file = io.BytesIO(excel_file_bytes)
@@ -535,15 +549,33 @@ class OpenOrdersReporting:
             
             return stats
             
+        except pd.errors.EmptyDataError as e:
+            logging.error(f"[OpenOrdersReporting] Empty data error: {str(e)}", exc_info=True)
+            stats['success'] = False
+            stats['error_message'] = "The Excel file contains no data or only header information."
+            stats['error_type'] = 'empty_data_error'
+            stats['end_time'] = datetime.now()
+            stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
+            return stats
+            
+        except pd.errors.ParserError as e:
+            logging.error(f"[OpenOrdersReporting] Excel parser error: {str(e)}", exc_info=True)
+            stats['success'] = False
+            stats['error_message'] = "Unable to parse the Excel file. The file may be corrupted or in an unsupported format."
+            stats['error_type'] = 'parser_error'
+            stats['end_time'] = datetime.now()
+            stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
+            return stats
+            
         except Exception as e:
-            logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}", exc_info=True) # Added exc_info for traceback
-            # Populate stats with error info
+            logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}", exc_info=True)
             stats['success'] = False
             stats['error_message'] = str(e)
+            stats['error_type'] = 'processing_error'
             stats['end_time'] = datetime.now()
             if 'start_time' in stats: # Ensure start_time was set
                 stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
-            raise # Re-raise the exception after logging
+            return stats # Return error stats instead of raising the exception
     
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""

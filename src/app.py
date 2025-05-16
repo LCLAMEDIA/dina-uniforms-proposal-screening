@@ -170,6 +170,30 @@ def sharepoint_process_oor():
             filename=file_name
         )
         
+        # Check if processing was successful
+        if not result.get('success', True):  # Default to True for backward compatibility
+            error_type = result.get('error_type', 'unknown_error')
+            error_message = result.get('error_message', 'Unknown error occurred')
+            logging.error(f"[OOR] Processing failed: {error_type} - {error_message}")
+            
+            # Format error message based on error type
+            user_message = error_message
+            if error_type == 'validation_error':
+                user_message = f"File validation failed: {error_message}"
+            elif error_type == 'empty_data_error':
+                user_message = "The Excel file contains no data or only header information."
+            elif error_type == 'parser_error':
+                user_message = "Unable to parse the Excel file. The file may be corrupted or in an unsupported format."
+            
+            error_response = {
+                "success": False,
+                "message": user_message,
+                "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+                "error_type": error_type
+            }
+            
+            return jsonify(error_response), 400
+        
         # Format today's date for display
         today_fmt = datetime.now().strftime("%d-%m-%Y")
         folder_fmt = datetime.now().strftime("%d-%m-%y")
