@@ -217,29 +217,27 @@ class OpenOrdersReporting:
         processed_df = df.copy()
         
         # --- Prepare columns for composite key ---
-        actual_composite_key_cols = list(self.COMPOSITE_KEY_BASE_COLS) # Start with base columns
+        # Use all available columns as the composite key for maximum deduplication precision
+        actual_composite_key_cols = []
+        
+        # First, add all original columns from the dataframe
+        for col_name in processed_df.columns:
+            # Skip DateIssued as it will be used for sorting, not as part of the key
+            if col_name != 'DateIssued':
+                actual_composite_key_cols.append(col_name)
+                logging.info(f"[OpenOrdersReporting._remove_duplicates] Adding column '{col_name}' to composite key")
 
-        # Normalize 'itemDescription' if it exists
+        # Normalize 'itemDescription' if it exists for better matching
         if 'itemDescription' in processed_df.columns:
             processed_df[self.NORMALIZED_ITEM_DESC_COL] = processed_df['itemDescription'].apply(self._normalize_string)
             actual_composite_key_cols.append(self.NORMALIZED_ITEM_DESC_COL)
-        else:
-            logging.warning("[OpenOrdersReporting._remove_duplicates] 'itemDescription' column not found. Deduplication might be less accurate.")
+            logging.info(f"[OpenOrdersReporting._remove_duplicates] Added normalized itemDescription to composite key")
 
-        # Parse 'Note' field if it exists
+        # Parse 'Note' field if it exists for better matching
         if 'Note' in processed_df.columns:
             processed_df[self.PARSED_NOTE_ID_COL] = processed_df['Note'].apply(self._parse_note_for_id)
             actual_composite_key_cols.append(self.PARSED_NOTE_ID_COL)
-        else:
-            logging.warning("[OpenOrdersReporting._remove_duplicates] 'Note' column not found. Deduplication might be less accurate.")
-        
-        # Add other optional key columns if they exist
-        # In the next update will implement Dynamc Sheet mappings for this values
-        for col_name in ['QID', 'PurchaseNumber', 'barcodeupc', 'Vendor', 'Suppliers', 'OurRef']: # Added new potential columns
-            if col_name in processed_df.columns:
-                actual_composite_key_cols.append(col_name)
-            else:
-                logging.info(f"[OpenOrdersReporting._remove_duplicates] Optional key column '{col_name}' not found. Skipping for composite key.")
+            logging.info(f"[OpenOrdersReporting._remove_duplicates] Added parsed Note ID to composite key")
         
         # Ensure all columns in actual_composite_key_cols exist in processed_df before using them
         # This is more of a safeguard; they should exist if added above or are base.
