@@ -482,9 +482,11 @@ class OpenOrdersReporting:
             
             # 6. SIXTH - Prepare for output
             # Save and upload CSV files
-            # Add timestamp to make each filename unique (YYYYMMDD_HHMMSS)
-            today_filename_fmt = datetime.now().strftime("%Y%m%d_%H%M%S")
-            today_folder_fmt = datetime.now().strftime("%d-%m-%y")
+            # Create structured filename components
+            current_time = datetime.now()
+            today_date_fmt = current_time.strftime("%Y%m%d")
+            time_fmt = current_time.strftime("%H%M")
+            today_folder_fmt = current_time.strftime("%d-%m-%y")
             
             # Fix path formatting for SharePoint
             processed_date_dir = os.path.join(self.oor_output_path, today_folder_fmt).replace('\\', '/')
@@ -494,13 +496,18 @@ class OpenOrdersReporting:
             
             # 7. SEVENTH - Upload main file if it's not empty
             if not remaining_df.empty:
+                # Extract meaningful metadata for the filename
+                row_count = len(remaining_df)
+                
                 # Check if we're generating separate files or just one main file
                 if product_dataframes: # If product_dataframes has entries, this is the "OTHERS" file
-                    others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
+                    others_filename = f"OTHERS_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
                 else: # If no product_dataframes, this is the main consolidated file
-                    others_filename = f"OOR {today_filename_fmt}.csv"
+                    others_filename = f"OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
                 
-                logging.info(f"[OpenOrdersReporting] Creating file with unique timestamp: {others_filename}")
+                # Extract source filename (if available) for reference in logs
+                source_reference = f" from {filename}" if filename else ""
+                logging.info(f"[OpenOrdersReporting] Creating structured file: {others_filename}{source_reference}")
                     
                 # Sanitize the filename to avoid filesystem issues
                 others_filename = self._sanitize_filename(others_filename)
@@ -525,9 +532,14 @@ class OpenOrdersReporting:
                     
                 # Get customer name from processing rules
                 customer_name = self.processing_rules[product_code].get('customer_name', product_code)
-                product_filename = f"{customer_name} OOR {today_filename_fmt}.csv" # Added OOR for consistency and timestamp
                 
-                logging.info(f"[OpenOrdersReporting] Creating customer file with unique timestamp: {product_filename}")
+                # Extract meaningful metadata for the filename
+                row_count = len(product_df)
+                product_filename = f"{customer_name}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
+                
+                # Extract source filename (if available) for reference in logs
+                source_reference = f" from {filename}" if filename else ""
+                logging.info(f"[OpenOrdersReporting] Creating customer file: {product_filename}{source_reference}")
                 
                 # Sanitize the filename to avoid filesystem issues
                 product_filename = self._sanitize_filename(product_filename)
