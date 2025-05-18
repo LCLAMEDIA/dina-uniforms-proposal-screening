@@ -64,25 +64,20 @@ class OpenOrdersReporting:
         # Validate no overlapping prefixes for separate files
         self._validate_product_codes()
         
-        # Add detailed configuration logging
-        logging.info("[OpenOrdersReporting] Loaded configuration values:")
-        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
-        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
-        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
-        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
-        
         # Configure folder paths based on environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
         self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
         self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
         
-        # After loading configuration values
-        logging.info(f"[OpenOrdersReporting] Loaded configuration values:")
+        # Log all configuration values in one place
+        logging.info("[OpenOrdersReporting] Loaded configuration values:")
         logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
         logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
         logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
         logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
         logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
+        logging.info(f"[OpenOrdersReporting] - Input path: {self.oor_input_path}")
+        logging.info(f"[OpenOrdersReporting] - Output path: {self.oor_output_path}")
 
     def validate_oor_file(self, file_bytes: bytes, filename: str) -> tuple:
         """
@@ -92,9 +87,6 @@ class OpenOrdersReporting:
         - Checks if the required headers are present in the Excel file
         Returns (True, '') if valid, else (False, reason)
         """
-        import os
-        import pandas as pd
-        import io
 
         # 1. Check if filename contains 'OOR' (case-insensitive, normalized)
         if 'OOR' not in self._normalize_string(filename):
@@ -118,55 +110,6 @@ class OpenOrdersReporting:
             return False, f"Missing required headers: {', '.join(missing_headers)}"
 
         return True, ''
-
-        logging.info("[OpenOrdersReporting] Initializing OpenOrdersReporting")
-        # Initialize Azure and SharePoint connections
-        self.azure_ops = AzureOperations()
-        access_token = self.azure_ops.get_access_token()
-        self.sharepoint_ops = SharePointOperations(access_token=access_token)
-        
-        # Load dynamic configuration
-        self.config_reader = ConfigurationReader(sharepoint_ops=self.sharepoint_ops)
-        config_loaded = self.config_reader.load_configuration()
-        logging.info(f"[OpenOrdersReporting] Configuration loaded: {config_loaded}")
-        
-        # Get configuration values
-        self.official_brands = self.config_reader.get_official_brands()
-        self.product_num_mapping = self.config_reader.get_product_num_mapping()
-        self.separate_file_customers = self.config_reader.get_separate_file_customers()
-        self.dedup_customers = self.config_reader.get_dedup_customers()
-        
-        # Create processing rules from configuration data
-        self.processing_rules = {}
-        for product_code, customer_name in self.product_num_mapping.items():
-            self.processing_rules[product_code] = {
-                'customer_name': customer_name,
-                'create_separate_file': product_code in self.separate_file_customers,
-                'remove_duplicates': product_code in self.dedup_customers
-            }
-        
-        # Validate no overlapping prefixes for separate files
-        self._validate_product_codes()
-        
-        # Add detailed configuration logging
-        logging.info("[OpenOrdersReporting] Loaded configuration values:")
-        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
-        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
-        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
-        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
-        
-        # Configure folder paths based on environment variables
-        self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
-        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
-        self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
-        
-        # After loading configuration values
-        logging.info(f"[OpenOrdersReporting] Loaded configuration values:")
-        logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
-        logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
-        logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
-        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
-        logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
     
     def _normalize_string(self, value: Any) -> str:
         """
