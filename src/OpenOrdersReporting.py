@@ -482,7 +482,8 @@ class OpenOrdersReporting:
             
             # 6. SIXTH - Prepare for output
             # Save and upload CSV files
-            today_filename_fmt = datetime.now().strftime("%Y%m%d")
+            # Add timestamp to make each filename unique (YYYYMMDD_HHMMSS)
+            today_filename_fmt = datetime.now().strftime("%Y%m%d_%H%M%S")
             today_folder_fmt = datetime.now().strftime("%d-%m-%y")
             
             # Fix path formatting for SharePoint
@@ -498,6 +499,8 @@ class OpenOrdersReporting:
                     others_filename = f"OTHERS OOR {today_filename_fmt}.csv"
                 else: # If no product_dataframes, this is the main consolidated file
                     others_filename = f"OOR {today_filename_fmt}.csv"
+                
+                logging.info(f"[OpenOrdersReporting] Creating file with unique timestamp: {others_filename}")
                     
                 # Sanitize the filename to avoid filesystem issues
                 others_filename = self._sanitize_filename(others_filename)
@@ -522,7 +525,9 @@ class OpenOrdersReporting:
                     
                 # Get customer name from processing rules
                 customer_name = self.processing_rules[product_code].get('customer_name', product_code)
-                product_filename = f"{customer_name} OOR {today_filename_fmt}.csv" # Added OOR for consistency
+                product_filename = f"{customer_name} OOR {today_filename_fmt}.csv" # Added OOR for consistency and timestamp
+                
+                logging.info(f"[OpenOrdersReporting] Creating customer file with unique timestamp: {product_filename}")
                 
                 # Sanitize the filename to avoid filesystem issues
                 product_filename = self._sanitize_filename(product_filename)
