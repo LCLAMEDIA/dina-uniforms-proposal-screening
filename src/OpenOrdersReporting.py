@@ -288,32 +288,32 @@ class OpenOrdersReporting:
         """
         Process an Excel file containing an Open Order Report.
         Returns statistics about the processing and uploads files to SharePoint.
-
+        
         Parameters:
         - excel_file_bytes: The bytes of the Excel file to process
         - filename: The name of the input file
-
+        
         Returns:
         - Dict with processing statistics or error information
         """
-
+        
         logging.info(f"[OpenOrdersReporting] Processing file: {filename}")
         logging.info(f"[OpenOrdersReporting] Data size: {len(excel_file_bytes)} bytes")
-
+        
         if len(excel_file_bytes) > 10:
-            logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")
-
+            logging.info(f"[OpenOrdersReporting] First 10 bytes: {excel_file_bytes[:10].hex()}")   
+        
         # Statistics tracking
         stats = {
             'input_file': filename,
             'total_rows': 0,
             'filtered_brand_rows': 0,
-            'duplicate_rows_removed_by_customer_logic': 0, # Renamed for clarity
+            'duplicate_rows_removed_by_customer_logic': 0,
             'output_files': {},
             'product_counts': {},
             'start_time': datetime.now(),
         }
-
+        
         # Validate the file first
         is_valid, validation_message = self.validate_oor_file(excel_file_bytes, filename)
         if not is_valid:
@@ -324,139 +324,224 @@ class OpenOrdersReporting:
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
             return stats
-
+            
         try:
             # Read the Excel file from bytes
             excel_file = io.BytesIO(excel_file_bytes)
             logging.info(f"[OpenOrdersReporting] Created BytesIO object, attempting to read with pandas")
-
+            
             # Read Excel file without creating an index
             df = pd.read_excel(excel_file, engine='openpyxl', index_col=None)
-
+            
             # Log the column names to verify
             logging.info(f"[OpenOrdersReporting] Excel columns: {list(df.columns)}")
-
+            
             # Clean up any 'Unnamed' columns if they exist
             unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
             if unnamed_cols:
                 logging.info(f"[OpenOrdersReporting] Removing unnamed columns: {unnamed_cols}")
                 df = df.drop(columns=unnamed_cols)
-
+            
             stats['total_rows'] = len(df)
             logging.info(f"[OpenOrdersReporting] Successfully read Excel file with {len(df)} rows")
-
+        
             # Main dataframe to process
-            main_df = df.copy()
+            main_df = df.copy().reset_index(drop=True)  # Ensure clean sequential index
             product_num_column = 'ProductNum'  # Key column for filtering
-
+            
             # Check required columns exist to avoid errors later
-            required_columns = [product_num_column, 'DateIssued', 'Order']  # Add other critical columns
+            required_columns = [product_num_column, 'DateIssued', 'Order']
             missing_columns = [col for col in required_columns if col not in main_df.columns]
             if missing_columns:
                 logging.warning(f"[OpenOrdersReporting] Missing required columns: {missing_columns}. Processing may be incomplete.")
-                # Continue anyway with available columns
-
+            
             # 1. FIRST - Apply deduplication based on product code configuration
-            # This now calls the _remove_duplicates_by_customer which in turn calls the enhanced _remove_duplicates
             rows_before_customer_dedup = len(main_df)
             main_df = self._remove_duplicates_by_customer(main_df)
+            main_df = main_df.reset_index(drop=True)  # Clean index after deduplication
             rows_after_customer_dedup = len(main_df)
             stats['duplicate_rows_removed_by_customer_logic'] = rows_before_customer_dedup - rows_after_customer_dedup
             logging.info(f"[OpenOrdersReporting] Total duplicates removed by customer-specific logic: {stats['duplicate_rows_removed_by_customer_logic']}")
-
-            # 2. SECOND - Filter out brands from the official brands list
-            if product_num_column in main_df.columns:
-                former_customers_mask = pd.Series(False, index=main_df.index)
+            
+            # 2. ENHANCED - Filter out brands with validation
+            if product_num_column in main_df.columns and self.official_brands:
+                logging.info(f"[OpenOrdersReporting] Starting brand filtering. Initial rows: {len(main_df)}")
+                
+                # Build list of rows to remove (more reliable than compound masking)
+                rows_to_remove = []
+                brand_removal_stats = {}
+                
                 for brand in self.official_brands:
+                    if not brand or pd.isna(brand):
+                        logging.warning(f"[OpenOrdersReporting] Skipping invalid brand: {brand}")
+                        continue
+                        
+                    brand = str(brand).strip()
+                    if not brand:
+                        continue
+                        
+                    # Create fresh mask for this brand
                     brand_prefix = f"{brand}-"
-                    # Ensure ProductNum is string for startswith
-                    prefix_mask = main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False)
-                    if prefix_mask.any():
-                        former_customers_mask = former_customers_mask | prefix_mask
-
-                if former_customers_mask.any():
-                    former_customers_df = main_df[former_customers_mask].copy()
-                    stats['filtered_brand_rows'] = len(former_customers_df)
-                    main_df = main_df[~former_customers_mask].copy()
-                    logging.info(f"[OpenOrdersReporting] Removed {len(former_customers_df)} filtered brand rows")
-
+                    current_mask = main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False)
+                    
+                    # Get matching rows
+                    matching_rows = main_df[current_mask]
+                    if not matching_rows.empty:
+                        brand_removal_stats[brand] = len(matching_rows)
+                        rows_to_remove.extend(matching_rows.index.tolist())
+                        logging.info(f"[OpenOrdersReporting] Brand '{brand}': found {len(matching_rows)} rows to remove")
+                
+                # Remove duplicates from removal list
+                rows_to_remove = list(set(rows_to_remove))
+                
+                if rows_to_remove:
+                    # Validate before deletion
+                    initial_count = len(main_df)
+                    
+                    # Perform deletion
+                    main_df = main_df.drop(index=rows_to_remove).reset_index(drop=True)
+                    
+                    # Validate after deletion
+                    final_count = len(main_df)
+                    expected_count = initial_count - len(rows_to_remove)
+                    
+                    if final_count != expected_count:
+                        logging.error(f"[OpenOrdersReporting] DELETION VALIDATION FAILED! Expected {expected_count} rows, got {final_count}")
+                        logging.error(f"[OpenOrdersReporting] Initial: {initial_count}, Removed: {len(rows_to_remove)}, Final: {final_count}")
+                        raise Exception("Brand filtering deletion failed validation")
+                    
+                    stats['filtered_brand_rows'] = len(rows_to_remove)
+                    logging.info(f"[OpenOrdersReporting] Successfully removed {len(rows_to_remove)} rows from brands: {list(brand_removal_stats.keys())}")
+                    logging.info(f"[OpenOrdersReporting] Brand removal breakdown: {brand_removal_stats}")
+                else:
+                    stats['filtered_brand_rows'] = 0
+                    logging.info("[OpenOrdersReporting] No rows found matching filtered brands")
+            else:
+                stats['filtered_brand_rows'] = 0
+                logging.info("[OpenOrdersReporting] No brand filtering needed - no official brands or ProductNum column missing")
+            
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
-
-            # 4. FOURTH - Split data by product code based on configuration
+            
+            # 4. ENHANCED - Split data by product code with validation
             product_dataframes = {}
-            remaining_df = main_df.copy()
-
+            remaining_df = main_df.copy().reset_index(drop=True)
+            
             if product_num_column in remaining_df.columns:
+                initial_remaining_count = len(remaining_df)
+                total_rows_moved = 0
+                
+                logging.info(f"[OpenOrdersReporting] Starting product splitting. Initial remaining rows: {initial_remaining_count}")
+                
                 # Process each product code that has processing rules
                 for product_code, rule in self.processing_rules.items():
                     # Skip if not configured to create a separate file
                     if not rule.get('create_separate_file', False):
                         continue
-
-                    # Create product code mask
-                    exact_match = remaining_df[product_num_column] == product_code
-                    prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
-                    product_mask = exact_match | prefix_match
-
-                    if product_mask.any():
-                        # Extract matching rows to a separate dataframe
-                        product_df = remaining_df[product_mask].copy()
-                        product_df = self._add_checking_customer_columns(product_df) # Add columns before specific processing
-
-                        # Apply customer name mapping
-                        product_df = self._apply_processing(product_df, rule.get('customer_name', product_code)) # Use mapped name
-
-                        # Add to the product dataframes dictionary
-                        product_dataframes[product_code] = product_df
-
-                        # Update stats
-                        stats['product_counts'][product_code] = len(product_df)
-
-                        # Remove from the main dataframe
-                        remaining_df = remaining_df[~product_mask].copy()
-                        logging.info(f"[OpenOrdersReporting] Separated {len(product_df)} rows for {product_code} (Customer: {rule.get('customer_name', product_code)})")
-
+                    
+                    if not product_code or pd.isna(product_code):
+                        logging.warning(f"[OpenOrdersReporting] Skipping invalid product_code: {product_code}")
+                        continue
+                    
+                    product_code = str(product_code).strip()
+                    if not product_code:
+                        continue
+                    
+                    # Count before split
+                    before_split_count = len(remaining_df)
+                    
+                    # Create product code mask with validation
+                    try:
+                        exact_match = remaining_df[product_num_column].astype(str) == product_code
+                        prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
+                        product_mask = exact_match | prefix_match
+                        
+                        if product_mask.any():
+                            # Extract matching rows to a separate dataframe
+                            product_df = remaining_df[product_mask].copy().reset_index(drop=True)
+                            extracted_count = len(product_df)
+                            
+                            # Remove from remaining dataframe
+                            remaining_df = remaining_df[~product_mask].copy().reset_index(drop=True)
+                            after_split_count = len(remaining_df)
+                            
+                            # Validate the split
+                            expected_remaining = before_split_count - extracted_count
+                            if after_split_count != expected_remaining:
+                                logging.error(f"[OpenOrdersReporting] PRODUCT SPLIT VALIDATION FAILED for {product_code}!")
+                                logging.error(f"[OpenOrdersReporting] Before: {before_split_count}, Extracted: {extracted_count}, After: {after_split_count}, Expected: {expected_remaining}")
+                                raise Exception(f"Product splitting failed validation for {product_code}")
+                            
+                            # Process the extracted data
+                            product_df = self._add_checking_customer_columns(product_df)
+                            
+                            # Apply customer name mapping
+                            customer_name = rule.get('customer_name', product_code)
+                            product_df = self._apply_processing(product_df, customer_name)
+                            
+                            # Add to the product dataframes dictionary
+                            product_dataframes[product_code] = product_df
+                            stats['product_counts'][product_code] = len(product_df)
+                            total_rows_moved += extracted_count
+                            
+                            logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
+                        else:
+                            logging.info(f"[OpenOrdersReporting] No rows found for product code: {product_code}")
+                            
+                    except Exception as e:
+                        logging.error(f"[OpenOrdersReporting] Error processing product code {product_code}: {e}")
+                        continue
+                
+                # Final validation of product splitting
+                final_remaining_count = len(remaining_df)
+                expected_final_count = initial_remaining_count - total_rows_moved
+                
+                if final_remaining_count != expected_final_count:
+                    logging.error(f"[OpenOrdersReporting] FINAL SPLIT VALIDATION FAILED!")
+                    logging.error(f"[OpenOrdersReporting] Initial: {initial_remaining_count}, Moved: {total_rows_moved}, Final: {final_remaining_count}, Expected: {expected_final_count}")
+                    raise Exception("Product splitting final validation failed")
+                
+                logging.info(f"[OpenOrdersReporting] Product splitting completed successfully: {total_rows_moved} rows moved to {len(product_dataframes)} separate files")
+            
             # 5. FIFTH - Process the remaining data
             # Apply customer/checking note processing to remaining dataframe
-            remaining_df = self._apply_processing(remaining_df, "OTHERS") # Pass "OTHERS" as df_name
+            remaining_df = self._apply_processing(remaining_df, "OTHERS")
             stats['remaining_rows'] = len(remaining_df)
-
+            
             # 6. SIXTH - Prepare for output
-            # Save and upload CSV files
             # Create structured filename components
             current_time = datetime.now()
             today_date_fmt = current_time.strftime("%Y%m%d")
             time_fmt = current_time.strftime("%H%M")
             today_folder_fmt = current_time.strftime("%d-%m-%y")
-
+            
             # Fix path formatting for SharePoint
             processed_date_dir = os.path.join(self.oor_output_path, today_folder_fmt).replace('\\', '/')
-
+            
             site_id = self.sharepoint_ops.get_site_id()
             drive_id = self.sharepoint_ops.get_drive_id(site_id=site_id)
-
+            
             # 7. SEVENTH - Upload main file if it's not empty
             if not remaining_df.empty:
                 # Extract meaningful metadata for the filename
                 row_count = len(remaining_df)
-
+                
                 # Check if we're generating separate files or just one main file
-                if product_dataframes: # If product_dataframes has entries, this is the "OTHERS" file
+                if product_dataframes:
                     others_filename = f"OTHERS_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
-                else: # If no product_dataframes, this is the main consolidated file
+                else:
                     others_filename = f"OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
-
+                
                 # Extract source filename (if available) for reference in logs
                 source_reference = f" from {filename}" if filename else ""
                 logging.info(f"[OpenOrdersReporting] Creating structured file: {others_filename}{source_reference}")
-
+                    
                 # Sanitize the filename to avoid filesystem issues
                 others_filename = self._sanitize_filename(others_filename)
-
+                    
                 others_path = f"{processed_date_dir}/{others_filename}"
                 others_bytes = self._dataframe_to_csv_bytes(remaining_df)
-
+                
                 # Upload to SharePoint
                 self.sharepoint_ops.upload_file_to_path(
                     drive_id=drive_id,
@@ -465,49 +550,49 @@ class OpenOrdersReporting:
                     file_bytes=others_bytes,
                     content_type="text/csv"
                 )
-                stats['output_files']['main_or_others'] = others_filename # Clarified key
-
+                stats['output_files']['main_or_others'] = others_filename
+            
             # 8. EIGHTH - Upload product-specific files
             for product_code, product_df in product_dataframes.items():
                 if product_df.empty:
                     continue
-
+                    
                 # Get customer name from processing rules
                 customer_name = self.processing_rules[product_code].get('customer_name', product_code)
-
+                
                 # Extract meaningful metadata for the filename
                 row_count = len(product_df)
                 product_filename = f"{customer_name}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
-
+                
                 # Extract source filename (if available) for reference in logs
                 source_reference = f" from {filename}" if filename else ""
                 logging.info(f"[OpenOrdersReporting] Creating customer file: {product_filename}{source_reference}")
-
+                
                 # Sanitize the filename to avoid filesystem issues
                 product_filename = self._sanitize_filename(product_filename)
-
+                
                 product_path = f"{processed_date_dir}/{product_filename}"
                 product_bytes = self._dataframe_to_csv_bytes(product_df)
-
+                
                 # Upload to SharePoint
                 self.sharepoint_ops.upload_file_to_path(
                     drive_id=drive_id,
                     file_path=product_path,
                     file_name=product_filename,
-                    file_bytes=product_bytes,
+                    file_bytes=product_bytes, 
                     content_type="text/csv"
                 )
-                stats['output_files'][customer_name] = product_filename # Use customer_name as key for stats
-
+                stats['output_files'][customer_name] = product_filename
+            
             # Finalize stats
             stats['success'] = True
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
-
+            
             logging.info(f"[OpenOrdersReporting] Processing completed in {stats['duration']:.2f} seconds. Stats: {stats}")
-
+            
             return stats
-
+            
         except pd.errors.EmptyDataError as e:
             logging.error(f"[OpenOrdersReporting] Empty data error: {str(e)}", exc_info=True)
             stats['success'] = False
@@ -516,7 +601,7 @@ class OpenOrdersReporting:
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
             return stats
-
+            
         except pd.errors.ParserError as e:
             logging.error(f"[OpenOrdersReporting] Excel parser error: {str(e)}", exc_info=True)
             stats['success'] = False
@@ -525,16 +610,16 @@ class OpenOrdersReporting:
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
             return stats
-
+            
         except Exception as e:
             logging.error(f"[OpenOrdersReporting] Error processing file: {str(e)}", exc_info=True)
             stats['success'] = False
             stats['error_message'] = str(e)
             stats['error_type'] = 'processing_error'
             stats['end_time'] = datetime.now()
-            if 'start_time' in stats: # Ensure start_time was set
+            if 'start_time' in stats:
                 stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
-            return stats # Return error stats instead of raising the exception
+            return stats
 
     def _dataframe_to_csv_bytes(self, df: pd.DataFrame) -> bytes:
         """Convert a pandas DataFrame to CSV bytes with proper quoting"""
@@ -638,17 +723,32 @@ class OpenOrdersReporting:
         return df_to_process
 
     def _extract_product_code(self, product_num: str) -> str:
-        """Extract the product code from a product number (e.g., 'SAK' from 'SAK-XYZ')."""
-        # This method is kept for potential utility but is not directly used by the new deduplication logic.
-        if not product_num or not isinstance(product_num, str):
-            return ""
-
-        # If there's a hyphen, get everything before it
+        """
+        Extract the product code from a product number with validation.
+        
+        Args:
+            product_num: Product number string (e.g., 'SAK-XYZ-123')
+            
+        Returns:
+            Product code prefix (e.g., 'SAK') or 'UNKNOWN' for invalid inputs
+        """
+        if not product_num or pd.isna(product_num):
+            return "UNKNOWN"
+        
+        if not isinstance(product_num, str):
+            product_num = str(product_num)
+        
+        product_num = product_num.strip()
+        if not product_num:
+            return "UNKNOWN"
+        
+        # Get prefix before first hyphen
         if "-" in product_num:
-            return product_num.split("-")[0]
-
-        # Otherwise return the whole string
-        return product_num
+            prefix = product_num.split("-")[0].strip().upper()
+            return prefix if prefix else "UNKNOWN"
+        
+        # Handle products without hyphens
+        return product_num.upper()
 
     def _validate_product_codes(self):
         """
