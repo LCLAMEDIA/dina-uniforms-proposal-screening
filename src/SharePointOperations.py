@@ -124,3 +124,134 @@ class SharePointOperations:
             return response.content
         
         return None
+    
+    def _ensure_folder_path_exists(self, drive_id: str, folder_path: str) -> bool:
+        """
+        Ensure a folder path exists in SharePoint, creating it if necessary.
+        
+        Args:
+            drive_id: The ID of the SharePoint drive
+            folder_path: The folder path to ensure exists
+            
+        Returns:
+            bool: True if the path exists or was created successfully, False otherwise
+        """
+        logging.info(f"[SharePointOperations] Ensuring folder path exists: {folder_path}")
+        
+        # Remove leading slash if present
+        if folder_path.startswith('/'):
+            folder_path = folder_path[1:]
+        
+        # If empty path, just return True
+        if not folder_path:
+            return True
+        
+        # Check if the entire path exists first
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder_path}"
+        
+        headers = {
+            'Authorization': f'Bearer {self.access_token}'
+        }
+        
+        response = requests.request("GET", url, headers=headers)
+        
+        # If the entire path exists, no need to create anything
+        if response.status_code == 200:
+            logging.info(f"[SharePointOperations] Folder path already exists: {folder_path}")
+            return True
+        
+        # If we're here, the path doesn't exist, but that's okay
+        # since SharePoint will do that automatically during file upload
+        logging.info(f"[SharePointOperations] Folder path '{folder_path}' doesn't exist yet, but will be created automatically during file upload")
+        return True
+
+    def upload_file_to_path(self, drive_id: str, file_path: str, file_name: str, file_bytes: bytes, content_type: str = "text/csv") -> None:
+        """
+        Upload a file to a specific path in SharePoint.
+        SharePoint will automatically create the folder structure if it doesn't exist.
+        
+        Args:
+            drive_id: The ID of the SharePoint drive
+            file_path: The full path in SharePoint where the file should be uploaded
+            file_name: The name of the file
+            file_bytes: The file content as bytes
+            content_type: The MIME type of the file (default: "text/csv")
+        """
+        logging.info(f"[SharePointOperations] Uploading file {file_name} to path {file_path}")
+        
+        # Remove leading slash if present
+        if file_path.startswith('/'):
+            file_path = file_path[1:]
+        
+        # Check if the path contains a filename - if not, append the filename
+        if not file_path.endswith(file_name):
+            if file_path and not file_path.endswith('/'):
+                file_path += '/'
+            file_path += file_name
+        
+        # Upload the file - SharePoint will create necessary folders automatically
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{file_path}:/content"
+        
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': content_type
+        }
+        
+        response = requests.request("PUT", url, headers=headers, data=file_bytes)
+        
+        if response.status_code in [200, 201]:
+            logging.info(f"[SharePointOperations] File {file_name} uploaded successfully to {file_path}. Info: <{response.status_code}> {response.text}")
+        else:
+            logging.exception(f"[SharePointOperations] Failed to upload file {file_name} to {file_path}. Info: <{response.status_code}> {response.text}")
+            
+    def list_items_in_folder(self, drive_id: str, folder_path: str):
+        """List items in a folder."""
+        try:
+            # Ensure path starts with a forward slash
+            if not folder_path.startswith('/'):
+                folder_path = f"/{folder_path}"
+                
+            # URL encode the path for API call
+            import urllib.parse
+            encoded_path = urllib.parse.quote(folder_path)
+            
+            # Build API URL for folder children
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:{encoded_path}:/children"
+            
+            headers = {
+                'Authorization': f"Bearer {self.access_token}",
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json().get('value', [])
+            else:
+                logging.error(f"[SharePointOperations] Failed to list folder: {folder_path}. Status: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            logging.error(f"[SharePointOperations] Error listing folder: {str(e)}")
+            return []
+
+    def get_file_content(self, drive_id: str, item_id: str):
+        """Get file content by item ID."""
+        try:
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
+            
+            headers = {
+                'Authorization': f"Bearer {self.access_token}"
+            }
+            
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.content
+            else:
+                logging.error(f"[SharePointOperations] Failed to get file. Status: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"[SharePointOperations] Error getting file: {str(e)}")
+            return None
