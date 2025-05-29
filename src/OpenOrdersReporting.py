@@ -380,9 +380,14 @@ class OpenOrdersReporting:
                     if not brand:
                         continue
                         
-                    # Create fresh mask for this brand
+                    # Create fresh mask for this brand WITH space handling
                     brand_prefix = f"{brand}-"
-                    current_mask = main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False)
+                    brand_prefix_trimmed = f"{brand.strip()}-"
+                    
+                    current_mask = (
+                        main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False) |
+                        main_df[product_num_column].astype(str).str.strip().str.startswith(brand_prefix_trimmed, na=False)
+                    )
                     
                     # Get matching rows
                     matching_rows = main_df[current_mask]
@@ -423,7 +428,7 @@ class OpenOrdersReporting:
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. ENHANCED - Split data by product code with validation
+            # 4. ENHANCED - Split data by product code with validation AND space handling
             product_dataframes = {}
             remaining_df = main_df.copy().reset_index(drop=True)
             
@@ -450,11 +455,17 @@ class OpenOrdersReporting:
                     # Count before split
                     before_split_count = len(remaining_df)
                     
-                    # Create product code mask with validation
+                    # Create product code mask with validation AND space handling
                     try:
+                        # Handle both exact matches and space variations
                         exact_match = remaining_df[product_num_column].astype(str) == product_code
                         prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
-                        product_mask = exact_match | prefix_match
+                        
+                        # ADDITION: Also check for space-trimmed versions
+                        exact_match_trimmed = remaining_df[product_num_column].astype(str).str.strip() == product_code.strip()
+                        prefix_match_trimmed = remaining_df[product_num_column].astype(str).str.strip().str.startswith(f"{product_code.strip()}-", na=False)
+                        
+                        product_mask = exact_match | prefix_match | exact_match_trimmed | prefix_match_trimmed
                         
                         if product_mask.any():
                             # Extract matching rows to a separate dataframe
