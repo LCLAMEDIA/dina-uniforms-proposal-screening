@@ -165,31 +165,16 @@ class OpenOrdersReporting:
         # Create a working copy for adding normalized/parsed columns
         processed_df = df.copy()
 
-        # --- Prepare columns for composite key ---
-        # Use all available columns as the composite key for maximum deduplication precision
-        actual_composite_key_cols = []
+        # Define the composite key columns based on manual processing analysis
+        key_columns = ['ProductNum', 'itemDescription', 'QtyOrdered']
 
-        # First, add all original columns from the dataframe
-        for col_name in processed_df.columns:
-            # Skip DateIssued as it will be used for sorting, not as part of the key
-            if col_name != 'DateIssued':
-                actual_composite_key_cols.append(col_name)
-                logging.info(f"[OpenOrdersReporting._remove_duplicates] Adding column '{col_name}' to composite key")
+        # Verify all key columns exist
+        missing_cols = [col for col in key_columns if col not in processed_df.columns]
+        if missing_cols:
+            logging.warning(f"[OpenOrdersReporting._remove_duplicates] Missing key columns {missing_cols}. Falling back to available columns.")
+            key_columns = [col for col in key_columns if col in processed_df.columns]
 
-        # Normalize 'itemDescription' if it exists for better matching
-        if 'itemDescription' in processed_df.columns:
-            processed_df[self.NORMALIZED_ITEM_DESC_COL] = processed_df['itemDescription'].apply(self._normalize_string)
-            actual_composite_key_cols.append(self.NORMALIZED_ITEM_DESC_COL)
-            logging.info(f"[OpenOrdersReporting._remove_duplicates] Added normalized itemDescription to composite key")
-
-        # Parse 'Note' field if it exists for better matching
-        if 'Note' in processed_df.columns:
-            processed_df[self.PARSED_NOTE_ID_COL] = processed_df['Note'].apply(self._parse_note_for_id)
-            actual_composite_key_cols.append(self.PARSED_NOTE_ID_COL)
-            logging.info(f"[OpenOrdersReporting._remove_duplicates] Added parsed Note ID to composite key")
-
-        # Ensure all columns in actual_composite_key_cols exist in processed_df before using them
-        final_key_cols_for_drop = [col for col in actual_composite_key_cols if col in processed_df.columns]
+        final_key_cols_for_drop = key_columns
         if not final_key_cols_for_drop:
             logging.warning("[OpenOrdersReporting._remove_duplicates] No valid key columns found for deduplication. Returning original DataFrame.")
             return df
@@ -209,13 +194,6 @@ class OpenOrdersReporting:
         # --- Drop duplicates based on the composite key ---
         # `keep='first'` on the sorted DataFrame retains the latest entry.
         result_df = processed_df.drop_duplicates(subset=final_key_cols_for_drop, keep='first')
-
-        # Remove temporary columns before returning
-        temp_cols = [self.NORMALIZED_ITEM_DESC_COL, self.PARSED_NOTE_ID_COL]
-        columns_to_remove = [col for col in temp_cols if col in result_df.columns]
-        if columns_to_remove:
-            result_df = result_df.drop(columns=columns_to_remove)
-            logging.info(f"[OpenOrdersReporting._remove_duplicates] Removed temporary columns: {columns_to_remove}")
 
         after_count = len(result_df)
         removed_count = before_count - after_count
