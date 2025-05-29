@@ -54,11 +54,18 @@ class OpenOrdersReporting:
         # Create processing rules from configuration data
         self.processing_rules = {}
         for product_code, customer_name in self.product_num_mapping.items():
-            self.processing_rules[product_code] = {
+            # Normalize the product code key by trimming whitespace
+            normalized_key = str(product_code).strip()
+            if not normalized_key:  # Skip empty keys
+                logging.warning(f"[OpenOrdersReporting] Skipping empty product code key")
+                continue
+                
+            # Use the normalized key for the processing rules
+            self.processing_rules[normalized_key] = {
                 'customer_name': customer_name,
-                'create_separate_file': product_code in self.separate_file_customers,
-                'remove_duplicates': product_code in self.dedup_customers
-            }
+                'create_separate_file': normalized_key in self.separate_file_customers or product_code in self.separate_file_customers,
+                'remove_duplicates': normalized_key in self.dedup_customers or product_code in self.dedup_customers
+            }   
 
         # Validate no overlapping prefixes for separate files
         self._validate_product_codes()
