@@ -166,7 +166,7 @@ class OpenOrdersReporting:
         processed_df = df.copy()
 
         # Define the composite key columns based on manual processing analysis
-        key_columns = ['ProductNum', 'itemDescription', 'QtyOrdered']
+        key_columns = ['ProductNum', 'QtyOrdered']
 
         # Verify all key columns exist
         missing_cols = [col for col in key_columns if col not in processed_df.columns]
