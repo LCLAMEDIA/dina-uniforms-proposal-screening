@@ -49,9 +49,7 @@ class OpenOrdersReporting:
         self.official_brands = self.config_reader.get_official_brands()
         self.product_num_mapping = self.config_reader.get_product_num_mapping()
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
-        self.dedup_customers = self.config_reader.get_dedup_customers()
-        self.vendor_filter_customers = self.config_reader.get_vendor_filter_customers()
-        self.vendor_cleanup_customers = self.config_reader.get_vendor_cleanup_customers()
+        self.vendor_cleanup_mapping = self.config_reader.get_vendor_cleanup_mapping()
 
         # Create processing rules from configuration data
         self.processing_rules = {}
@@ -65,8 +63,7 @@ class OpenOrdersReporting:
             # Use the normalized key for the processing rules
             self.processing_rules[normalized_key] = {
                 'customer_name': customer_name,
-                'create_separate_file': normalized_key in self.separate_file_customers or product_code in self.separate_file_customers,
-                'remove_duplicates': normalized_key in self.dedup_customers or product_code in self.dedup_customers
+                'create_separate_file': normalized_key in self.separate_file_customers or product_code in self.separate_file_customers
             }   
 
         # Validate no overlapping prefixes for separate files
@@ -82,9 +79,7 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
         logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
         logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
-        logging.info(f"[OpenOrdersReporting] - Deduplication customers: {self.dedup_customers}")
-        logging.info(f"[OpenOrdersReporting] - Vendor filter customers: {self.vendor_filter_customers}")
-        logging.info(f"[OpenOrdersReporting] - Vendor cleanup customers: {self.vendor_cleanup_customers}")
+        logging.info(f"[OpenOrdersReporting] - Vendor cleanup mapping: {self.vendor_cleanup_mapping}")
         logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
         logging.info(f"[OpenOrdersReporting] - Input path: {self.oor_input_path}")
         logging.info(f"[OpenOrdersReporting] - Output path: {self.oor_output_path}")
@@ -150,24 +145,24 @@ class OpenOrdersReporting:
 
     def _apply_vendor_filtering(self, df: pd.DataFrame, product_code: str) -> pd.DataFrame:
         """
-        Apply vendor filtering based on configuration for a specific product code.
+        Apply vendor filtering and cleanup based on configuration for a specific product code.
         
         Args:
             df: DataFrame to filter
             product_code: Product code to check for vendor filtering rules
             
         Returns:
-            DataFrame with vendor filtering applied
+            DataFrame with vendor filtering and cleanup applied
         """
         if df.empty:
             return df
         
-        # Check if this product code has vendor filtering configured
-        if product_code not in self.vendor_filter_customers:
+        # Check if this product code has vendor cleanup configured
+        if product_code not in self.vendor_cleanup_mapping:
             logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] No vendor filtering configured for {product_code}")
             return df
         
-        required_vendor = self.vendor_filter_customers[product_code]
+        required_vendor = self.vendor_cleanup_mapping[product_code]
         
         # Check if Vendors column exists
         if 'Vendors' not in df.columns:
@@ -191,10 +186,9 @@ class OpenOrdersReporting:
                 
                 logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC-SAMPLE products: {len(sample_df)} -> {len(filtered_sample_df)} (removed {len(sample_df) - len(filtered_sample_df)} non-{required_vendor} vendors)")
                 
-                # Apply vendor cleanup if configured
-                if product_code in self.vendor_cleanup_customers:
-                    filtered_sample_df['Vendors'] = filtered_sample_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
-                    logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
+                # Apply vendor cleanup - remove the vendor name from the Vendors column
+                filtered_sample_df['Vendors'] = filtered_sample_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
+                logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
                 
                 # Combine filtered sample data with non-sample data
                 result_df = pd.concat([filtered_sample_df, non_sample_df], ignore_index=True)
@@ -205,10 +199,9 @@ class OpenOrdersReporting:
             vendor_match_mask = df['Vendors'].astype(str).str.contains(required_vendor, case=False, na=False)
             result_df = df[vendor_match_mask].copy()
             
-            # Apply vendor cleanup if configured
-            if product_code in self.vendor_cleanup_customers:
-                result_df['Vendors'] = result_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
-                logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
+            # Apply vendor cleanup - remove the vendor name from the Vendors column
+            result_df['Vendors'] = result_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
         
         final_count = len(result_df)
         removed_count = initial_count - final_count
@@ -220,151 +213,85 @@ class OpenOrdersReporting:
         
         return result_df.reset_index(drop=True)
 
-    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _apply_vendor_filtering_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Enhanced duplicate removal using a composite key, normalization, and sorting.
-        Keeps the latest record based on 'DateIssued' if duplicates are found.
+        Identifies data segments for customers configured for vendor filtering and applies
+        the vendor filtering logic to those segments.
 
         Args:
             df: DataFrame to process.
 
         Returns:
-            DataFrame with duplicates removed based on the enhanced logic.
-        """
-        if df.empty:
-            logging.info("[OpenOrdersReporting._remove_duplicates] Input DataFrame is empty, skipping deduplication.")
-            return df
-
-        before_count = len(df)
-        logging.info(f"[OpenOrdersReporting._remove_duplicates] Starting enhanced deduplication. Rows before: {before_count}")
-
-        # Create a working copy for adding normalized/parsed columns
-        processed_df = df.copy()
-
-        # Define the composite key columns based on manual processing analysis
-        key_columns = ['ProductNum','Order','QtyOrdered']
-
-        # Verify all key columns exist
-        missing_cols = [col for col in key_columns if col not in processed_df.columns]
-        if missing_cols:
-            logging.warning(f"[OpenOrdersReporting._remove_duplicates] Missing key columns {missing_cols}. Falling back to available columns.")
-            key_columns = [col for col in key_columns if col in processed_df.columns]
-
-        final_key_cols_for_drop = key_columns
-        if not final_key_cols_for_drop:
-            logging.warning("[OpenOrdersReporting._remove_duplicates] No valid key columns found for deduplication. Returning original DataFrame.")
-            return df
-
-        logging.info(f"[OpenOrdersReporting._remove_duplicates] Using composite key columns: {final_key_cols_for_drop}")
-
-        # --- Sort to keep the latest record ---
-        # Sort by 'DateIssued' (descending) if available. Add other tie-breakers if needed.
-        if 'DateIssued' in processed_df.columns:
-            logging.info("[OpenOrdersReporting._remove_duplicates] Sorting by 'DateIssued' (descending) to keep the latest record among duplicates.")
-            # Ensure DateIssued is datetime for proper sorting, handle errors gracefully
-            processed_df['DateIssued'] = pd.to_datetime(processed_df['DateIssued'], errors='coerce')
-            processed_df.sort_values(by=['DateIssued'], ascending=[False], inplace=True, na_position='last')
-        else:
-            logging.warning("[OpenOrdersReporting._remove_duplicates] 'DateIssued' column not found. Cannot sort to keep latest; will keep first encountered.")
-
-        # --- Drop duplicates based on the composite key ---
-        # `keep='first'` on the sorted DataFrame retains the latest entry.
-        result_df = processed_df.drop_duplicates(subset=final_key_cols_for_drop, keep='first')
-
-        after_count = len(result_df)
-        removed_count = before_count - after_count
-
-        if removed_count > 0:
-            logging.info(f"[OpenOrdersReporting._remove_duplicates] Enhanced deduplication removed {removed_count} rows.")
-        else:
-            logging.info("[OpenOrdersReporting._remove_duplicates] No duplicate rows removed by enhanced deduplication.")
-        logging.info(f"[OpenOrdersReporting._remove_duplicates] Rows after enhanced deduplication: {after_count}")
-
-        # BUG FIX: Return processed DataFrame directly with clean index
-        return result_df.reset_index(drop=True)
-
-    def _remove_duplicates_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Identifies data segments for customers configured for deduplication and applies
-        the enhanced deduplication logic to those segments.
-
-        Args:
-            df: DataFrame to process.
-
-        Returns:
-            DataFrame with duplicates removed for configured product codes/customers.
+            DataFrame with vendor filtering applied for configured product codes/customers.
         """
         if df.empty:
             return df
 
         # Check if 'ProductNum' column exists, essential for this logic
         if 'ProductNum' not in df.columns:
-            logging.warning("[OpenOrdersReporting._remove_duplicates_by_customer] 'ProductNum' column not found. Skipping customer-specific deduplication.")
+            logging.warning("[OpenOrdersReporting._apply_vendor_filtering_by_customer] 'ProductNum' column not found. Skipping vendor filtering.")
             return df
 
-        # Identify product codes that are configured for deduplication
-        # self.dedup_customers stores product codes (e.g., 'SAK') that require deduplication
-        product_codes_requiring_dedup = [pc for pc in self.dedup_customers if pc in self.processing_rules and self.processing_rules[pc].get('remove_duplicates', False)]
+        # Identify product codes that are configured for vendor filtering
+        product_codes_requiring_filtering = list(self.vendor_cleanup_mapping.keys())
 
-        if not product_codes_requiring_dedup:
-            logging.info("[OpenOrdersReporting._remove_duplicates_by_customer] No customers/product codes configured for deduplication. Skipping.")
+        if not product_codes_requiring_filtering:
+            logging.info("[OpenOrdersReporting._apply_vendor_filtering_by_customer] No customers/product codes configured for vendor filtering. Skipping.")
             return df
 
-        logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Performing deduplication for product codes: {product_codes_requiring_dedup}")
+        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Performing vendor filtering for product codes: {product_codes_requiring_filtering}")
 
-        # Create a combined mask for all rows that belong to products needing deduplication
-        combined_mask_for_dedup_products = pd.Series(False, index=df.index)
-        for product_code in product_codes_requiring_dedup:
-            # Match exact product code or product code as a prefix (e.g., SAK and SAK-123)
+        # Create a combined mask for all rows that belong to products needing vendor filtering
+        combined_mask_for_filtering_products = pd.Series(False, index=df.index)
+        for product_code in product_codes_requiring_filtering:
+            # Match exact product code or product code as a prefix (e.g., GENERIC and GENERIC-*)
             exact_match = df['ProductNum'] == product_code
             prefix_match = df['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
             current_product_mask = exact_match | prefix_match
-            combined_mask_for_dedup_products = combined_mask_for_dedup_products | current_product_mask
+            combined_mask_for_filtering_products = combined_mask_for_filtering_products | current_product_mask
 
-        # Split DataFrame into parts: one that needs deduplication, one that doesn't
-        df_to_deduplicate_segment = df[combined_mask_for_dedup_products].copy()
-        df_no_deduplication_needed_segment = df[~combined_mask_for_dedup_products].copy()
+        # Split DataFrame into parts: one that needs vendor filtering, one that doesn't
+        df_to_filter_segment = df[combined_mask_for_filtering_products].copy()
+        df_no_filtering_needed_segment = df[~combined_mask_for_filtering_products].copy()
 
-        deduplicated_segment = pd.DataFrame() # Initialize empty DataFrame for the deduplicated part
+        filtered_segment = pd.DataFrame()  # Initialize empty DataFrame for the filtered part
 
-        if not df_to_deduplicate_segment.empty:
-            logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Applying enhanced deduplication to {len(df_to_deduplicate_segment)} rows from configured products.")
+        if not df_to_filter_segment.empty:
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Applying vendor filtering to {len(df_to_filter_segment)} rows from configured products.")
             
-            # Apply vendor filtering before deduplication for each product code
+            # Apply vendor filtering for each product code
             vendor_filtered_segments = []
-            for product_code in product_codes_requiring_dedup:
+            for product_code in product_codes_requiring_filtering:
                 # Get data for this specific product code
-                exact_match = df_to_deduplicate_segment['ProductNum'] == product_code
-                prefix_match = df_to_deduplicate_segment['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
+                exact_match = df_to_filter_segment['ProductNum'] == product_code
+                prefix_match = df_to_filter_segment['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
                 product_mask = exact_match | prefix_match
-                product_segment = df_to_deduplicate_segment[product_mask].copy()
+                product_segment = df_to_filter_segment[product_mask].copy()
                 
                 if not product_segment.empty:
-                    # Apply vendor filtering first
+                    # Apply vendor filtering
                     vendor_filtered_segment = self._apply_vendor_filtering(product_segment, product_code)
                     vendor_filtered_segments.append(vendor_filtered_segment)
             
             # Combine all vendor-filtered segments
             if vendor_filtered_segments:
-                combined_filtered_segment = pd.concat(vendor_filtered_segments, ignore_index=True)
+                filtered_segment = pd.concat(vendor_filtered_segments, ignore_index=True)
             else:
-                combined_filtered_segment = df_to_deduplicate_segment.copy()
+                filtered_segment = df_to_filter_segment.copy()
             
-            # Apply the enhanced _remove_duplicates method to the vendor-filtered segment
-            deduplicated_segment = self._remove_duplicates(combined_filtered_segment)
-            logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Rows in segment after vendor filtering and deduplication: {len(deduplicated_segment)}. "
-                         f"Original: {len(df_to_deduplicate_segment)}, After filtering: {len(combined_filtered_segment)}, After dedup: {len(deduplicated_segment)}")
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Rows in segment after vendor filtering: {len(filtered_segment)}. "
+                         f"Original: {len(df_to_filter_segment)}, After filtering: {len(filtered_segment)}")
         else:
-            logging.info("[OpenOrdersReporting._remove_duplicates_by_customer] No rows found for products configured for deduplication.")
+            logging.info("[OpenOrdersReporting._apply_vendor_filtering_by_customer] No rows found for products configured for vendor filtering.")
 
-        # Concatenate the deduplicated segment (if any) with the segment that didn't need deduplication
-        if not deduplicated_segment.empty:
-            final_df = pd.concat([deduplicated_segment, df_no_deduplication_needed_segment], ignore_index=True)
-        else: # If deduplicated_segment is empty (either no rows to dedup or all were deduped to empty)
-            final_df = df_no_deduplication_needed_segment.copy()
+        # Concatenate the filtered segment (if any) with the segment that didn't need filtering
+        if not filtered_segment.empty:
+            final_df = pd.concat([filtered_segment, df_no_filtering_needed_segment], ignore_index=True)
+        else:  # If filtered_segment is empty
+            final_df = df_no_filtering_needed_segment.copy()
 
-        logging.info(f"[OpenOrdersReporting._remove_duplicates_by_customer] Total rows after customer-specific deduplication pass: {len(final_df)}")
-        return final_df.reset_index(drop=True) # Reset index for clean DataFrame
+        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Total rows after vendor filtering: {len(final_df)}")
+        return final_df.reset_index(drop=True)  # Reset index for clean DataFrame
 
     def process_excel_file(self, excel_file_bytes: bytes, filename: str = None) -> Dict[str, Any]:
         """
@@ -437,13 +364,13 @@ class OpenOrdersReporting:
             if missing_columns:
                 logging.warning(f"[OpenOrdersReporting] Missing required columns: {missing_columns}. Processing may be incomplete.")
             
-            # 1. FIRST - Apply deduplication based on product code configuration
-            rows_before_customer_dedup = len(main_df)
-            main_df = self._remove_duplicates_by_customer(main_df)
-            main_df = main_df.reset_index(drop=True)  # Clean index after deduplication
-            rows_after_customer_dedup = len(main_df)
-            stats['duplicate_rows_removed_by_customer_logic'] = rows_before_customer_dedup - rows_after_customer_dedup
-            logging.info(f"[OpenOrdersReporting] Total duplicates removed by customer-specific logic: {stats['duplicate_rows_removed_by_customer_logic']}")
+            # 1. FIRST - Apply vendor filtering based on product code configuration
+            rows_before_vendor_filtering = len(main_df)
+            main_df = self._apply_vendor_filtering_by_customer(main_df)
+            main_df = main_df.reset_index(drop=True)  # Clean index after filtering
+            rows_after_vendor_filtering = len(main_df)
+            stats['duplicate_rows_removed_by_customer_logic'] = rows_before_vendor_filtering - rows_after_vendor_filtering
+            logging.info(f"[OpenOrdersReporting] Total rows removed by vendor filtering: {stats['duplicate_rows_removed_by_customer_logic']}")
             
             # 2. ENHANCED - Filter out brands with validation
             if product_num_column in main_df.columns and self.official_brands:

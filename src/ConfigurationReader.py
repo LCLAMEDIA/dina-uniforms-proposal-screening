@@ -16,9 +16,7 @@ class ConfigurationReader:
         self.official_brands = []
         self.product_num_mapping = {}
         self.separate_file_customers = []
-        self.dedup_customers = []
-        self.vendor_filter_customers = {}  # Maps product code to vendor filter value
-        self.vendor_cleanup_customers = []  # List of product codes that need vendor cleanup
+        self.vendor_cleanup_mapping = {}  # Maps product code to vendor name for filtering and cleanup
     
     def load_configuration(self) -> bool:
         """Load configuration from SharePoint Excel file."""
@@ -128,31 +126,17 @@ class ConfigurationReader:
                         if separate_file_mask.any():
                             self.separate_file_customers = mapping_df.loc[separate_file_mask, 'Code'].tolist()
                     
-                    # Create deduplication list
-                    if 'RemoveDuplicates' in mapping_df.columns:
-                        dedup_mask = (mapping_df['RemoveDuplicates'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
-                        if dedup_mask.any():
-                            self.dedup_customers = mapping_df.loc[dedup_mask, 'Code'].tolist()
-                    
-                    # Create vendor filter mapping
-                    if 'VendorFilter' in mapping_df.columns:
-                        vendor_filter_rows = mapping_df[mapping_df['VendorFilter'].notna() & mapping_df['Code'].notna()]
-                        self.vendor_filter_customers = dict(zip(
-                            vendor_filter_rows['Code'].astype(str),
-                            vendor_filter_rows['VendorFilter'].astype(str)
-                        ))
-                    
-                    # Create vendor cleanup list
+                    # Create vendor cleanup mapping
                     if 'VendorCleanup' in mapping_df.columns:
-                        cleanup_mask = (mapping_df['VendorCleanup'].astype(str).str.upper().str.contains('YES')) & mapping_df['Code'].notna()
-                        if cleanup_mask.any():
-                            self.vendor_cleanup_customers = mapping_df.loc[cleanup_mask, 'Code'].tolist()
+                        vendor_cleanup_rows = mapping_df[mapping_df['VendorCleanup'].notna() & mapping_df['Code'].notna()]
+                        self.vendor_cleanup_mapping = dict(zip(
+                            vendor_cleanup_rows['Code'].astype(str),
+                            vendor_cleanup_rows['VendorCleanup'].astype(str)
+                        ))
                     
                     logging.info(f"[ConfigurationReader] Loaded {len(self.product_num_mapping)} product mappings")
                     logging.info(f"[ConfigurationReader] Loaded {len(self.separate_file_customers)} separate file customers: {self.separate_file_customers}")
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.dedup_customers)} customers for deduplication: {self.dedup_customers}")
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.vendor_filter_customers)} vendor filter customers: {self.vendor_filter_customers}")
-                    logging.info(f"[ConfigurationReader] Loaded {len(self.vendor_cleanup_customers)} vendor cleanup customers: {self.vendor_cleanup_customers}")
+                    logging.info(f"[ConfigurationReader] Loaded {len(self.vendor_cleanup_mapping)} vendor cleanup customers: {self.vendor_cleanup_mapping}")
                 
             return True
                 
@@ -172,14 +156,6 @@ class ConfigurationReader:
         """Get list of customers that need separate files."""
         return self.separate_file_customers
     
-    def get_dedup_customers(self) -> List[str]:
-        """Get list of customers that need deduplication."""
-        return self.dedup_customers
-    
-    def get_vendor_filter_customers(self) -> Dict[str, str]:
-        """Get product code to vendor filter mapping."""
-        return self.vendor_filter_customers
-    
-    def get_vendor_cleanup_customers(self) -> List[str]:
-        """Get list of customers that need vendor cleanup."""
-        return self.vendor_cleanup_customers
+    def get_vendor_cleanup_mapping(self) -> Dict[str, str]:
+        """Get product code to vendor cleanup mapping."""
+        return self.vendor_cleanup_mapping
