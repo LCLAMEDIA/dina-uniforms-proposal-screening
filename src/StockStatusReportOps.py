@@ -32,17 +32,17 @@ class StockStatusReportOps:
         self.exported_file_bytes = exported_file_bytes
         self.stock_status_report_sheet = None
         self.columns_to_hide = [
-                                "E",
+                                "A",
                                 "F",
-                                "I",
+                                "G",
                                 "J",
-                                "L",
+                                "K",
                                 "M",
                                 "N",
-                                "P",
-                                "R",
+                                "O",
+                                "Q",
                                 "S",
-                                "U",
+                                "T",
                                 "V",
                                 "W",
                                 "X",
@@ -50,7 +50,7 @@ class StockStatusReportOps:
                                 "Z",
                                 "AA",
                                 "AB",
-                                "AD",
+                                "AC",
                                 "AE",
                                 "AF",
                                 "AG",
@@ -70,6 +70,8 @@ class StockStatusReportOps:
                                 "AU",
                                 "AV",
                                 "AW",
+                                "AX",
+                                "BD",
                             ]
         self.new_columns = [
                                 "UNIT PRICE",
