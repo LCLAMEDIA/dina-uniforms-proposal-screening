@@ -385,17 +385,16 @@ class OpenOrdersReporting:
                         logging.warning(f"[OpenOrdersReporting] Skipping invalid brand: {brand}")
                         continue
                         
-                    brand = str(brand).strip()
+                    # Normalize brand to uppercase for case-insensitive comparison
+                    brand = str(brand).strip().upper()
                     if not brand:
                         continue
                         
-                    # Create fresh mask for this brand WITH space handling
+                    # Create fresh mask for this brand with normalized comparison
                     brand_prefix = f"{brand}-"
-                    brand_prefix_trimmed = f"{brand.strip()}-"
                     
                     current_mask = (
-                        main_df[product_num_column].astype(str).str.startswith(brand_prefix, na=False) |
-                        main_df[product_num_column].astype(str).str.strip().str.startswith(brand_prefix_trimmed, na=False)
+                        main_df[product_num_column].astype(str).str.strip().str.upper().str.startswith(brand_prefix, na=False)
                     )
                     
                     # Get matching rows
