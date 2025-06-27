@@ -6,6 +6,7 @@ from datetime import datetime
 import csv
 from typing import Dict, List, Tuple, Any
 import re # Added for regex operations
+import difflib
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
@@ -87,17 +88,12 @@ class OpenOrdersReporting:
     def validate_oor_file(self, file_bytes: bytes, filename: str) -> tuple:
         """
         Validates if the file is an acceptable OOR Excel file for processing.
-        - Checks if the file name contains 'OOR' (case-insensitive, normalized)
         - Checks if the file is an Excel file (by extension and by reading with pandas)
-        - Checks if the required headers are present in the Excel file
+        - Checks if the required headers are present in the Excel file using fuzzy matching
         Returns (True, '') if valid, else (False, reason)
         """
 
-        # 1. Check if filename contains 'OOR' (case-insensitive, normalized)
-        if 'OOR' not in self._normalize_string(filename):
-            return False, "Filename does not contain 'OOR'"
-
-        # 2. Check if the file is an Excel file by extension
+        # 1. Check if the file is an Excel file by extension
         ext = os.path.splitext(filename)[1].lower()
         if ext not in ['.xlsx', '.xls']:
             return False, "File is not an Excel file (.xlsx or .xls)"
@@ -109,11 +105,14 @@ class OpenOrdersReporting:
         except Exception as e:
             return False, f"File could not be read as an Excel file: {str(e)}"
 
-        # 4. Check if required headers are present
-        missing_headers = [col for col in self.REQUIRED_OOR_HEADERS if col not in df.columns]
+        # 4. Check if required headers are present using fuzzy matching
+        header_mapping, missing_headers = self._create_header_mapping(df.columns.tolist(), self.REQUIRED_OOR_HEADERS)
         if missing_headers:
             return False, f"Missing required headers: {', '.join(missing_headers)}"
 
+        # Store the header mapping for later use in processing
+        self.current_header_mapping = header_mapping
+        
         return True, ''
 
     def _normalize_string(self, value: Any) -> str:
@@ -126,6 +125,111 @@ class OpenOrdersReporting:
         if not isinstance(value, str):
             value = str(value)
         return value.strip().upper()
+
+    def _create_header_mapping(self, excel_headers: List[str], required_headers: List[str]) -> Tuple[Dict[str, str], List[str]]:
+        """
+        Creates a mapping between required headers and actual Excel headers using fuzzy matching.
+        Returns (header_mapping_dict, missing_headers_list)
+        
+        Args:
+            excel_headers: List of headers from the Excel file
+            required_headers: List of required headers for processing
+            
+        Returns:
+            Tuple containing:
+            - Dict mapping required header -> actual Excel header
+            - List of headers that couldn't be matched (missing)
+        """
+        header_mapping = {}
+        missing_headers = []
+        
+        # Minimum similarity threshold for fuzzy matching (70%)
+        SIMILARITY_THRESHOLD = 70
+        
+        for required_header in required_headers:
+            # First try exact match (case-insensitive)
+            exact_match = None
+            for excel_header in excel_headers:
+                if required_header.lower() == excel_header.lower():
+                    exact_match = excel_header
+                    break
+            
+            if exact_match:
+                header_mapping[required_header] = exact_match
+                continue
+            
+            # If no exact match, try fuzzy matching using difflib
+            best_match_header = None
+            best_match_score = 0
+            
+            for excel_header in excel_headers:
+                # Calculate similarity ratio (0.0 to 1.0)
+                similarity = difflib.SequenceMatcher(None, required_header.lower(), excel_header.lower()).ratio()
+                similarity_percentage = similarity * 100
+                
+                if similarity_percentage >= SIMILARITY_THRESHOLD and similarity_percentage > best_match_score:
+                    best_match_header = excel_header
+                    best_match_score = similarity_percentage
+            
+            if best_match_header:
+                header_mapping[required_header] = best_match_header
+                logging.info(f"[OpenOrdersReporting] Fuzzy matched '{required_header}' -> '{best_match_header}' (score: {best_match_score:.1f}%)")
+            else:
+                missing_headers.append(required_header)
+                logging.warning(f"[OpenOrdersReporting] Could not match required header: '{required_header}'")
+        
+        return header_mapping, missing_headers
+
+    def _get_column(self, df: pd.DataFrame, required_header: str) -> pd.Series:
+        """
+        Gets a column from the dataframe using the header mapping.
+        Falls back to original header name if mapping doesn't exist.
+        
+        Args:
+            df: The dataframe to get the column from
+            required_header: The required header name
+            
+        Returns:
+            The column as a pandas Series
+        """
+        if hasattr(self, 'current_header_mapping') and required_header in self.current_header_mapping:
+            actual_header = self.current_header_mapping[required_header]
+            return df[actual_header]
+        else:
+            # Fallback to original header (for backward compatibility)
+            return df[required_header]
+
+    def _column_exists(self, df: pd.DataFrame, required_header: str) -> bool:
+        """
+        Checks if a column exists in the dataframe using the header mapping.
+        
+        Args:
+            df: The dataframe to check
+            required_header: The required header name
+            
+        Returns:
+            True if the column exists (either mapped or original), False otherwise
+        """
+        if hasattr(self, 'current_header_mapping') and required_header in self.current_header_mapping:
+            actual_header = self.current_header_mapping[required_header]
+            return actual_header in df.columns
+        else:
+            return required_header in df.columns
+
+    def _get_actual_column_name(self, required_header: str) -> str:
+        """
+        Gets the actual column name from the header mapping.
+        
+        Args:
+            required_header: The required header name
+            
+        Returns:
+            The actual column name (mapped or original)
+        """
+        if hasattr(self, 'current_header_mapping') and required_header in self.current_header_mapping:
+            return self.current_header_mapping[required_header]
+        else:
+            return required_header
 
     def _parse_note_for_id(self, note_text: Any) -> str:
         """
@@ -164,8 +268,14 @@ class OpenOrdersReporting:
         
         required_vendor = self.vendor_cleanup_mapping[product_code]
         
-        # Check if Vendors column exists
-        if 'Vendors' not in df.columns:
+        # Check if Vendors column exists (check both mapped and original column names)
+        vendors_col_exists = False
+        if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
+            vendors_col_exists = self.current_header_mapping['Vendors'] in df.columns
+        else:
+            vendors_col_exists = 'Vendors' in df.columns
+            
+        if not vendors_col_exists:
             logging.warning(f"[OpenOrdersReporting._apply_vendor_filtering] 'Vendors' column not found for {product_code} vendor filtering")
             return df
         
@@ -175,19 +285,23 @@ class OpenOrdersReporting:
         # Apply vendor filtering for GENERIC-SAMPLE products specifically
         if product_code == "GENERIC":
             # Special logic for GENERIC-SAMPLE-N/A-O/S products
-            sample_mask = df['ProductNum'].astype(str).str.contains('GENERIC-SAMPLE-N/A-O/S', na=False)
+            sample_mask = self._get_column(df, 'ProductNum').astype(str).str.contains('GENERIC-SAMPLE-N/A-O/S', na=False)
             sample_df = df[sample_mask].copy()
             non_sample_df = df[~sample_mask].copy()
             
             if not sample_df.empty:
                 # Filter sample products to keep only the required vendor
-                vendor_match_mask = sample_df['Vendors'].astype(str).str.contains(required_vendor, case=False, na=False)
+                vendor_match_mask = self._get_column(sample_df, 'Vendors').astype(str).str.contains(required_vendor, case=False, na=False)
                 filtered_sample_df = sample_df[vendor_match_mask].copy()
                 
                 logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC-SAMPLE products: {len(sample_df)} -> {len(filtered_sample_df)} (removed {len(sample_df) - len(filtered_sample_df)} non-{required_vendor} vendors)")
                 
                 # Apply vendor cleanup - remove the vendor name from the Vendors column
-                filtered_sample_df['Vendors'] = filtered_sample_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
+                if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
+                    actual_vendors_col = self.current_header_mapping['Vendors']
+                    filtered_sample_df[actual_vendors_col] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
+                else:
+                    filtered_sample_df['Vendors'] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
                 logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
                 
                 # Combine filtered sample data with non-sample data
@@ -196,11 +310,15 @@ class OpenOrdersReporting:
                 result_df = non_sample_df
         else:
             # General vendor filtering for other product codes
-            vendor_match_mask = df['Vendors'].astype(str).str.contains(required_vendor, case=False, na=False)
+            vendor_match_mask = self._get_column(df, 'Vendors').astype(str).str.contains(required_vendor, case=False, na=False)
             result_df = df[vendor_match_mask].copy()
             
             # Apply vendor cleanup - remove the vendor name from the Vendors column
-            result_df['Vendors'] = result_df['Vendors'].astype(str).str.replace(required_vendor, '', case=False).str.strip()
+            if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
+                actual_vendors_col = self.current_header_mapping['Vendors']
+                result_df[actual_vendors_col] = self._get_column(result_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
+            else:
+                result_df['Vendors'] = self._get_column(result_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
             logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
         
         final_count = len(result_df)
@@ -228,7 +346,7 @@ class OpenOrdersReporting:
             return df
 
         # Check if 'ProductNum' column exists, essential for this logic
-        if 'ProductNum' not in df.columns:
+        if not self._column_exists(df, 'ProductNum'):
             logging.warning("[OpenOrdersReporting._apply_vendor_filtering_by_customer] 'ProductNum' column not found. Skipping vendor filtering.")
             return df
 
@@ -245,8 +363,8 @@ class OpenOrdersReporting:
         combined_mask_for_filtering_products = pd.Series(False, index=df.index)
         for product_code in product_codes_requiring_filtering:
             # Match exact product code or product code as a prefix (e.g., GENERIC and GENERIC-*)
-            exact_match = df['ProductNum'] == product_code
-            prefix_match = df['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
+            exact_match = self._get_column(df, 'ProductNum') == product_code
+            prefix_match = self._get_column(df, 'ProductNum').astype(str).str.startswith(f"{product_code}-", na=False)
             current_product_mask = exact_match | prefix_match
             combined_mask_for_filtering_products = combined_mask_for_filtering_products | current_product_mask
 
@@ -263,8 +381,8 @@ class OpenOrdersReporting:
             vendor_filtered_segments = []
             for product_code in product_codes_requiring_filtering:
                 # Get data for this specific product code
-                exact_match = df_to_filter_segment['ProductNum'] == product_code
-                prefix_match = df_to_filter_segment['ProductNum'].astype(str).str.startswith(f"{product_code}-", na=False)
+                exact_match = self._get_column(df_to_filter_segment, 'ProductNum') == product_code
+                prefix_match = self._get_column(df_to_filter_segment, 'ProductNum').astype(str).str.startswith(f"{product_code}-", na=False)
                 product_mask = exact_match | prefix_match
                 product_segment = df_to_filter_segment[product_mask].copy()
                 
@@ -356,11 +474,11 @@ class OpenOrdersReporting:
         
             # Main dataframe to process
             main_df = df.copy().reset_index(drop=True)  # Ensure clean sequential index
-            product_num_column = 'ProductNum'  # Key column for filtering
+            product_num_column = self._get_actual_column_name('ProductNum')  # Key column for filtering
             
             # Check required columns exist to avoid errors later
-            required_columns = [product_num_column, 'DateIssued', 'Order']
-            missing_columns = [col for col in required_columns if col not in main_df.columns]
+            required_columns = ['ProductNum', 'DateIssued', 'Order']
+            missing_columns = [col for col in required_columns if not self._column_exists(main_df, col)]
             if missing_columns:
                 logging.warning(f"[OpenOrdersReporting] Missing required columns: {missing_columns}. Processing may be incomplete.")
             
@@ -373,7 +491,7 @@ class OpenOrdersReporting:
             logging.info(f"[OpenOrdersReporting] Total rows removed by vendor filtering: {stats['duplicate_rows_removed_by_customer_logic']}")
             
             # 2. ENHANCED - Filter out brands with validation
-            if product_num_column in main_df.columns and self.official_brands:
+            if self._column_exists(main_df, 'ProductNum') and self.official_brands:
                 logging.info(f"[OpenOrdersReporting] Starting brand filtering. Initial rows: {len(main_df)}")
                 
                 # Build list of rows to remove (more reliable than compound masking)
@@ -440,7 +558,7 @@ class OpenOrdersReporting:
             product_dataframes = {}
             remaining_df = main_df.copy().reset_index(drop=True)
             
-            if product_num_column in remaining_df.columns:
+            if self._column_exists(remaining_df, 'ProductNum'):
                 initial_remaining_count = len(remaining_df)
                 total_rows_moved = 0
                 
@@ -704,14 +822,14 @@ class OpenOrdersReporting:
         # Ensure 'CUSTOMER' and 'CHECKING NOTE' columns exist from _add_checking_customer_columns
         # df_to_process = self._add_checking_customer_columns(df_to_process) # Already called before this in main flow
 
-        product_num_column = 'ProductNum'
+        product_num_column = self._get_actual_column_name('ProductNum')
 
         # --- Customer Name Population ---
         # df_name is now the target customer name for specific files (e.g. "CALVARY") or "OTHERS"
         if df_name != "OTHERS" and df_name in self.product_num_mapping.values(): # If df_name is a mapped customer name
              df_to_process['CUSTOMER'] = df_name
         elif df_name == "FORMER CUSTOMERS": # This case might be redundant if official_brands are filtered out earlier
-            if product_num_column in df_to_process.columns:
+            if self._column_exists(df_to_process, 'ProductNum'):
                 for index, row in df_to_process.iterrows():
                     product_num_val = row.get(product_num_column)
                     if pd.notna(product_num_val):
@@ -719,7 +837,7 @@ class OpenOrdersReporting:
                         brand_prefix = product_num_str.split('-')[0] if '-' in product_num_str else product_num_str
                         if brand_prefix in self.official_brands: # official_brands contains product codes like 'BIS'
                              df_to_process.at[index, 'CUSTOMER'] = self.product_num_mapping.get(brand_prefix, brand_prefix)
-        elif product_num_column in df_to_process.columns:  # For OTHERS, try to map based on ProductNum
+        elif self._column_exists(df_to_process, 'ProductNum'):  # For OTHERS, try to map based on ProductNum
             for index, row in df_to_process.iterrows():
                 # Only attempt to fill CUSTOMER if it's currently empty or matches a generic placeholder
                 current_customer = str(row.get('CUSTOMER', '')).strip()
