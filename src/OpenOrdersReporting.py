@@ -699,7 +699,7 @@ class OpenOrdersReporting:
                 
                 # Extract meaningful metadata for the filename
                 row_count = len(product_df)
-                product_filename = f"{customer_name}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
+                product_filename = f"{product_code}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
                 
                 # Extract source filename (if available) for reference in logs
                 source_reference = f" from {filename}" if filename else ""
