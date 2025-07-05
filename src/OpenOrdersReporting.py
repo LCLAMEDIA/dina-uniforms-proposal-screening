@@ -630,11 +630,22 @@ class OpenOrdersReporting:
             stats['remaining_rows'] = len(remaining_df)
             
             # 6. SIXTH - Prepare for output
-            # Create structured filename components
-            current_time = datetime.now()
+            # Create structured filename components with robust date handling
+            # Use local timezone-aware datetime to ensure correct date
+            current_time = datetime.now().astimezone()
+            
+            # Log current time for debugging date issues  
+            logging.info(f"[OpenOrdersReporting] Current local time: {current_time}")
+            logging.info(f"[OpenOrdersReporting] Timezone: {current_time.tzinfo}")
+            logging.info(f"[OpenOrdersReporting] UTC offset: {current_time.utcoffset()}")
+            
             today_date_fmt = current_time.strftime("%Y%m%d")
             time_fmt = current_time.strftime("%H%M")
             today_folder_fmt = current_time.strftime("%d-%m-%y")
+            
+            # Log the generated date formats for verification
+            logging.info(f"[OpenOrdersReporting] Generated folder date: {today_folder_fmt} (DD-MM-YY format)")
+            logging.info(f"[OpenOrdersReporting] Generated file date: {today_date_fmt} (YYYYMMDD format)")
             
             # Fix path formatting for SharePoint
             processed_date_dir = os.path.join(self.oor_output_path, today_folder_fmt).replace('\\', '/')
