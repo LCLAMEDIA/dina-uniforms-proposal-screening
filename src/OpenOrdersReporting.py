@@ -283,13 +283,8 @@ class OpenOrdersReporting:
             
             logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC-SAMPLE products: {len(sample_df)} -> {len(filtered_sample_df)} (removed {len(sample_df) - len(filtered_sample_df)} non-PNW vendors)")
             
-            # Apply vendor cleanup - remove PNW from the Vendors column
-            if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
-                actual_vendors_col = self.current_header_mapping['Vendors']
-                filtered_sample_df[actual_vendors_col] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace('PNW', '', case=False).str.strip()
-            else:
-                filtered_sample_df['Vendors'] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace('PNW', '', case=False).str.strip()
-            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned 'PNW' from vendor names for GENERIC products")
+            # Keep PNW vendor name (don't remove it to avoid empty vendors column)
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Kept PNW vendor names for GENERIC products")
             
             # Combine filtered sample data with non-sample data
             result_df = pd.concat([filtered_sample_df, non_sample_df], ignore_index=True)
