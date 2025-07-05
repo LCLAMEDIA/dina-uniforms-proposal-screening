@@ -689,8 +689,14 @@ class OpenOrdersReporting:
                 if product_df.empty:
                     continue
                     
-                # Get customer name from processing rules
-                customer_name = self.processing_rules[product_code].get('customer_name', product_code)
+                # Get customer name from processing rules, handling NRM split variants
+                if product_code in self.processing_rules:
+                    customer_name = self.processing_rules[product_code].get('customer_name', product_code)
+                elif product_code.startswith('NRM-'):
+                    # Handle NRM split variants (NRM-NRMA, NRM-NRMPR, NRM-DC)
+                    customer_name = product_code  # Use the split variant name as customer name
+                else:
+                    customer_name = product_code
                 
                 # Extract meaningful metadata for the filename
                 row_count = len(product_df)
