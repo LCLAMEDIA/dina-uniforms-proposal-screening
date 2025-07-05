@@ -612,16 +612,30 @@ class OpenOrdersReporting:
                             # Process the extracted data
                             product_df = self._add_checking_customer_columns(product_df)
                             
-                            # Apply customer name mapping
-                            customer_name = rule.get('customer_name', product_code)
-                            product_df = self._apply_processing(product_df, customer_name)
-                            
-                            # Add to the product dataframes dictionary
-                            product_dataframes[product_code] = product_df
-                            stats['product_counts'][product_code] = len(product_df)
+                            # Special handling for NRM/NRMA products - split by Order prefix
+                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
+                                nrm_dataframes = self._apply_nrm_3way_split(product_df)
+                                # Add each NRM variant to product dataframes
+                                for nrm_variant, nrm_df in nrm_dataframes.items():
+                                    nrm_df = self._apply_processing(nrm_df, nrm_variant)
+                                    product_dataframes[nrm_variant] = nrm_df
+                                    stats['product_counts'][nrm_variant] = len(nrm_df)
+                                    logging.info(f"[OpenOrdersReporting] NRM variant '{nrm_variant}': {len(nrm_df)} rows")
+                            else:
+                                # Apply customer name mapping for non-NRM products
+                                customer_name = rule.get('customer_name', product_code)
+                                product_df = self._apply_processing(product_df, customer_name)
+                                
+                                # Add to the product dataframes dictionary
+                                product_dataframes[product_code] = product_df
+                                stats['product_counts'][product_code] = len(product_df)
+                                
                             total_rows_moved += extracted_count
                             
-                            logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
+                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
+                                logging.info(f"[OpenOrdersReporting] NRM/NRMA Product '{product_code}': moved {extracted_count} rows and split into 3 variants")
+                            else:
+                                logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
                         else:
                             logging.info(f"[OpenOrdersReporting] No rows found for product code: {product_code}")
                             
@@ -927,3 +941,72 @@ class OpenOrdersReporting:
             sanitized = base[:250-len(ext)] + ext
 
         return sanitized
+
+    def _apply_nrm_3way_split(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Apply 3-way splitting for NRM/NRMA products based on Order prefix.
+        
+        Parameters:
+        - df: DataFrame containing NRM or NRMA products
+        
+        Returns:
+        - Dict with 3 DataFrames: {'NRM-NRMA': df1, 'NRM-NRMPR': df2, 'NRM-DC': df3}
+        """
+        if df.empty:
+            return {'NRM-NRMA': pd.DataFrame(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
+        
+        # Get the Order column
+        if not self._column_exists(df, 'Order'):
+            logging.warning("[OpenOrdersReporting] Order column not found for NRM splitting. Assigning all to NRM-NRMA")
+            return {'NRM-NRMA': df.copy(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
+        
+        order_col = self._get_actual_column_name('Order')
+        
+        # Initialize result DataFrames
+        nrm_nrma_df = pd.DataFrame()
+        nrm_nrmpr_df = pd.DataFrame()
+        nrm_dc_df = pd.DataFrame()
+        
+        # Split by Order prefix
+        for index, row in df.iterrows():
+            order_value = row[order_col]
+            if pd.notna(order_value):
+                order_str = str(order_value).strip().upper()
+                
+                if order_str.startswith('NRMA-'):
+                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+                elif order_str.startswith('NRMPR-'):
+                    nrm_nrmpr_df = pd.concat([nrm_nrmpr_df, row.to_frame().T], ignore_index=True)
+                elif order_str.startswith('DC'):
+                    nrm_dc_df = pd.concat([nrm_dc_df, row.to_frame().T], ignore_index=True)
+                else:
+                    # Fallback for any other NRM products
+                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+            else:
+                # No order value, fallback to NRM-NRMA
+                nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+        
+        # Reset indexes
+        nrm_nrma_df = nrm_nrma_df.reset_index(drop=True)
+        nrm_nrmpr_df = nrm_nrmpr_df.reset_index(drop=True)
+        nrm_dc_df = nrm_dc_df.reset_index(drop=True)
+        
+        # Log split results
+        total_rows = len(df)
+        split_rows = len(nrm_nrma_df) + len(nrm_nrmpr_df) + len(nrm_dc_df)
+        
+        logging.info(f"[OpenOrdersReporting] NRM 3-way split completed:")
+        logging.info(f"[OpenOrdersReporting] - NRM-NRMA: {len(nrm_nrma_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - NRM-NRMPR: {len(nrm_nrmpr_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - NRM-DC: {len(nrm_dc_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - Total: {split_rows}/{total_rows} rows")
+        
+        if split_rows != total_rows:
+            logging.error(f"[OpenOrdersReporting] NRM split validation failed: {split_rows} != {total_rows}")
+            raise Exception("NRM 3-way split validation failed")
+        
+        return {
+            'NRM-NRMA': nrm_nrma_df,
+            'NRM-NRMPR': nrm_nrmpr_df,
+            'NRM-DC': nrm_dc_df
+        }
