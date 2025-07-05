@@ -50,7 +50,6 @@ class OpenOrdersReporting:
         self.official_brands = self.config_reader.get_official_brands()
         self.product_num_mapping = self.config_reader.get_product_num_mapping()
         self.separate_file_customers = self.config_reader.get_separate_file_customers()
-        self.vendor_cleanup_mapping = self.config_reader.get_vendor_cleanup_mapping()
 
         # Create processing rules from configuration data
         self.processing_rules = {}
@@ -80,7 +79,6 @@ class OpenOrdersReporting:
         logging.info(f"[OpenOrdersReporting] - Official brands: {self.official_brands}")
         logging.info(f"[OpenOrdersReporting] - Product number mappings: {self.product_num_mapping}")
         logging.info(f"[OpenOrdersReporting] - Separate file customers: {self.separate_file_customers}")
-        logging.info(f"[OpenOrdersReporting] - Vendor cleanup mapping: {self.vendor_cleanup_mapping}")
         logging.info(f"[OpenOrdersReporting] - Processing rules: {self.processing_rules}")
         logging.info(f"[OpenOrdersReporting] - Input path: {self.oor_input_path}")
         logging.info(f"[OpenOrdersReporting] - Output path: {self.oor_output_path}")
@@ -249,98 +247,74 @@ class OpenOrdersReporting:
 
     def _apply_vendor_filtering(self, df: pd.DataFrame, product_code: str) -> pd.DataFrame:
         """
-        Apply vendor filtering and cleanup based on configuration for a specific product code.
+        Apply hardcoded GENERIC vendor filtering to keep only PNW vendors.
         
         Args:
             df: DataFrame to filter
-            product_code: Product code to check for vendor filtering rules
+            product_code: Product code to check for GENERIC filtering
             
         Returns:
-            DataFrame with vendor filtering and cleanup applied
+            DataFrame with GENERIC-PNW filtering applied if applicable
         """
         if df.empty:
             return df
         
-        # Check if this product code has vendor cleanup configured
-        if product_code not in self.vendor_cleanup_mapping:
-            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] No vendor filtering configured for {product_code}")
+        # Only apply vendor filtering to GENERIC products
+        if product_code != "GENERIC":
             return df
         
-        required_vendor = self.vendor_cleanup_mapping[product_code]
-        
-        # Check if Vendors column exists (check both mapped and original column names)
-        vendors_col_exists = False
-        if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
-            vendors_col_exists = self.current_header_mapping['Vendors'] in df.columns
-        else:
-            vendors_col_exists = 'Vendors' in df.columns
-            
-        if not vendors_col_exists:
-            logging.warning(f"[OpenOrdersReporting._apply_vendor_filtering] 'Vendors' column not found for {product_code} vendor filtering")
+        # Check if Vendors column exists
+        if not self._column_exists(df, 'Vendors'):
+            logging.warning(f"[OpenOrdersReporting._apply_vendor_filtering] 'Vendors' column not found for GENERIC filtering")
             return df
         
         initial_count = len(df)
-        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Applying vendor filtering for {product_code}: keep only '{required_vendor}' vendors")
+        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Applying GENERIC vendor filtering: keep only 'PNW' vendors")
         
-        # Apply vendor filtering for GENERIC-SAMPLE products specifically
-        if product_code == "GENERIC":
-            # Special logic for GENERIC-SAMPLE-N/A-O/S products
-            sample_mask = self._get_column(df, 'ProductNum').astype(str).str.contains('GENERIC-SAMPLE-N/A-O/S', na=False)
-            sample_df = df[sample_mask].copy()
-            non_sample_df = df[~sample_mask].copy()
+        # Special logic for GENERIC-SAMPLE-N/A-O/S products
+        sample_mask = self._get_column(df, 'ProductNum').astype(str).str.contains('GENERIC-SAMPLE-N/A-O/S', na=False)
+        sample_df = df[sample_mask].copy()
+        non_sample_df = df[~sample_mask].copy()
+        
+        if not sample_df.empty:
+            # Filter sample products to keep only PNW vendor
+            vendor_match_mask = self._get_column(sample_df, 'Vendors').astype(str).str.contains('PNW', case=False, na=False)
+            filtered_sample_df = sample_df[vendor_match_mask].copy()
             
-            if not sample_df.empty:
-                # Filter sample products to keep only the required vendor
-                vendor_match_mask = self._get_column(sample_df, 'Vendors').astype(str).str.contains(required_vendor, case=False, na=False)
-                filtered_sample_df = sample_df[vendor_match_mask].copy()
-                
-                logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC-SAMPLE products: {len(sample_df)} -> {len(filtered_sample_df)} (removed {len(sample_df) - len(filtered_sample_df)} non-{required_vendor} vendors)")
-                
-                # Apply vendor cleanup - remove the vendor name from the Vendors column
-                if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
-                    actual_vendors_col = self.current_header_mapping['Vendors']
-                    filtered_sample_df[actual_vendors_col] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
-                else:
-                    filtered_sample_df['Vendors'] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
-                logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
-                
-                # Combine filtered sample data with non-sample data
-                result_df = pd.concat([filtered_sample_df, non_sample_df], ignore_index=True)
-            else:
-                result_df = non_sample_df
-        else:
-            # General vendor filtering for other product codes
-            vendor_match_mask = self._get_column(df, 'Vendors').astype(str).str.contains(required_vendor, case=False, na=False)
-            result_df = df[vendor_match_mask].copy()
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC-SAMPLE products: {len(sample_df)} -> {len(filtered_sample_df)} (removed {len(sample_df) - len(filtered_sample_df)} non-PNW vendors)")
             
-            # Apply vendor cleanup - remove the vendor name from the Vendors column
+            # Apply vendor cleanup - remove PNW from the Vendors column
             if hasattr(self, 'current_header_mapping') and 'Vendors' in self.current_header_mapping:
                 actual_vendors_col = self.current_header_mapping['Vendors']
-                result_df[actual_vendors_col] = self._get_column(result_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
+                filtered_sample_df[actual_vendors_col] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace('PNW', '', case=False).str.strip()
             else:
-                result_df['Vendors'] = self._get_column(result_df, 'Vendors').astype(str).str.replace(required_vendor, '', case=False).str.strip()
-            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned '{required_vendor}' from vendor names for {product_code}")
+                filtered_sample_df['Vendors'] = self._get_column(filtered_sample_df, 'Vendors').astype(str).str.replace('PNW', '', case=False).str.strip()
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Cleaned 'PNW' from vendor names for GENERIC products")
+            
+            # Combine filtered sample data with non-sample data
+            result_df = pd.concat([filtered_sample_df, non_sample_df], ignore_index=True)
+        else:
+            result_df = non_sample_df
         
         final_count = len(result_df)
         removed_count = initial_count - final_count
         
         if removed_count > 0:
-            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] Vendor filtering for {product_code} removed {removed_count} rows (kept {final_count})")
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] GENERIC vendor filtering removed {removed_count} rows (kept {final_count})")
         else:
-            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] No rows removed by vendor filtering for {product_code}")
+            logging.info(f"[OpenOrdersReporting._apply_vendor_filtering] No GENERIC rows filtered")
         
         return result_df.reset_index(drop=True)
 
     def _apply_vendor_filtering_by_customer(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Identifies data segments for customers configured for vendor filtering and applies
-        the vendor filtering logic to those segments.
+        Applies hardcoded GENERIC vendor filtering to keep only PNW vendors.
 
         Args:
             df: DataFrame to process.
 
         Returns:
-            DataFrame with vendor filtering applied for configured product codes/customers.
+            DataFrame with GENERIC-PNW filtering applied if applicable.
         """
         if df.empty:
             return df
@@ -350,14 +324,10 @@ class OpenOrdersReporting:
             logging.warning("[OpenOrdersReporting._apply_vendor_filtering_by_customer] 'ProductNum' column not found. Skipping vendor filtering.")
             return df
 
-        # Identify product codes that are configured for vendor filtering
-        product_codes_requiring_filtering = list(self.vendor_cleanup_mapping.keys())
+        # Only filter GENERIC products
+        product_codes_requiring_filtering = ["GENERIC"]
 
-        if not product_codes_requiring_filtering:
-            logging.info("[OpenOrdersReporting._apply_vendor_filtering_by_customer] No customers/product codes configured for vendor filtering. Skipping.")
-            return df
-
-        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Performing vendor filtering for product codes: {product_codes_requiring_filtering}")
+        logging.info(f"[OpenOrdersReporting._apply_vendor_filtering_by_customer] Performing GENERIC vendor filtering")
 
         # Create a combined mask for all rows that belong to products needing vendor filtering
         combined_mask_for_filtering_products = pd.Series(False, index=df.index)
@@ -612,16 +582,30 @@ class OpenOrdersReporting:
                             # Process the extracted data
                             product_df = self._add_checking_customer_columns(product_df)
                             
-                            # Apply customer name mapping
-                            customer_name = rule.get('customer_name', product_code)
-                            product_df = self._apply_processing(product_df, customer_name)
-                            
-                            # Add to the product dataframes dictionary
-                            product_dataframes[product_code] = product_df
-                            stats['product_counts'][product_code] = len(product_df)
+                            # Special handling for NRM/NRMA products - split by Order prefix
+                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
+                                nrm_dataframes = self._apply_nrm_3way_split(product_df)
+                                # Add each NRM variant to product dataframes
+                                for nrm_variant, nrm_df in nrm_dataframes.items():
+                                    nrm_df = self._apply_processing(nrm_df, nrm_variant)
+                                    product_dataframes[nrm_variant] = nrm_df
+                                    stats['product_counts'][nrm_variant] = len(nrm_df)
+                                    logging.info(f"[OpenOrdersReporting] NRM variant '{nrm_variant}': {len(nrm_df)} rows")
+                            else:
+                                # Apply customer name mapping for non-NRM products
+                                customer_name = rule.get('customer_name', product_code)
+                                product_df = self._apply_processing(product_df, customer_name)
+                                
+                                # Add to the product dataframes dictionary
+                                product_dataframes[product_code] = product_df
+                                stats['product_counts'][product_code] = len(product_df)
+                                
                             total_rows_moved += extracted_count
                             
-                            logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
+                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
+                                logging.info(f"[OpenOrdersReporting] NRM/NRMA Product '{product_code}': moved {extracted_count} rows and split into 3 variants")
+                            else:
+                                logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
                         else:
                             logging.info(f"[OpenOrdersReporting] No rows found for product code: {product_code}")
                             
@@ -646,11 +630,22 @@ class OpenOrdersReporting:
             stats['remaining_rows'] = len(remaining_df)
             
             # 6. SIXTH - Prepare for output
-            # Create structured filename components
-            current_time = datetime.now()
+            # Create structured filename components with robust date handling
+            # Use local timezone-aware datetime to ensure correct date
+            current_time = datetime.now().astimezone()
+            
+            # Log current time for debugging date issues  
+            logging.info(f"[OpenOrdersReporting] Current local time: {current_time}")
+            logging.info(f"[OpenOrdersReporting] Timezone: {current_time.tzinfo}")
+            logging.info(f"[OpenOrdersReporting] UTC offset: {current_time.utcoffset()}")
+            
             today_date_fmt = current_time.strftime("%Y%m%d")
             time_fmt = current_time.strftime("%H%M")
             today_folder_fmt = current_time.strftime("%d-%m-%y")
+            
+            # Log the generated date formats for verification
+            logging.info(f"[OpenOrdersReporting] Generated folder date: {today_folder_fmt} (DD-MM-YY format)")
+            logging.info(f"[OpenOrdersReporting] Generated file date: {today_date_fmt} (YYYYMMDD format)")
             
             # Fix path formatting for SharePoint
             processed_date_dir = os.path.join(self.oor_output_path, today_folder_fmt).replace('\\', '/')
@@ -699,7 +694,7 @@ class OpenOrdersReporting:
                 
                 # Extract meaningful metadata for the filename
                 row_count = len(product_df)
-                product_filename = f"{customer_name}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
+                product_filename = f"{product_code}_OOR_{today_date_fmt}_{time_fmt}_rows{row_count}.csv"
                 
                 # Extract source filename (if available) for reference in logs
                 source_reference = f" from {filename}" if filename else ""
@@ -927,3 +922,72 @@ class OpenOrdersReporting:
             sanitized = base[:250-len(ext)] + ext
 
         return sanitized
+
+    def _apply_nrm_3way_split(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Apply 3-way splitting for NRM/NRMA products based on Order prefix.
+        
+        Parameters:
+        - df: DataFrame containing NRM or NRMA products
+        
+        Returns:
+        - Dict with 3 DataFrames: {'NRM-NRMA': df1, 'NRM-NRMPR': df2, 'NRM-DC': df3}
+        """
+        if df.empty:
+            return {'NRM-NRMA': pd.DataFrame(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
+        
+        # Get the Order column
+        if not self._column_exists(df, 'Order'):
+            logging.warning("[OpenOrdersReporting] Order column not found for NRM splitting. Assigning all to NRM-NRMA")
+            return {'NRM-NRMA': df.copy(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
+        
+        order_col = self._get_actual_column_name('Order')
+        
+        # Initialize result DataFrames
+        nrm_nrma_df = pd.DataFrame()
+        nrm_nrmpr_df = pd.DataFrame()
+        nrm_dc_df = pd.DataFrame()
+        
+        # Split by Order prefix
+        for index, row in df.iterrows():
+            order_value = row[order_col]
+            if pd.notna(order_value):
+                order_str = str(order_value).strip().upper()
+                
+                if order_str.startswith('NRMA-'):
+                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+                elif order_str.startswith('NRMPR-'):
+                    nrm_nrmpr_df = pd.concat([nrm_nrmpr_df, row.to_frame().T], ignore_index=True)
+                elif order_str.startswith('DC'):
+                    nrm_dc_df = pd.concat([nrm_dc_df, row.to_frame().T], ignore_index=True)
+                else:
+                    # Fallback for any other NRM products
+                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+            else:
+                # No order value, fallback to NRM-NRMA
+                nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+        
+        # Reset indexes
+        nrm_nrma_df = nrm_nrma_df.reset_index(drop=True)
+        nrm_nrmpr_df = nrm_nrmpr_df.reset_index(drop=True)
+        nrm_dc_df = nrm_dc_df.reset_index(drop=True)
+        
+        # Log split results
+        total_rows = len(df)
+        split_rows = len(nrm_nrma_df) + len(nrm_nrmpr_df) + len(nrm_dc_df)
+        
+        logging.info(f"[OpenOrdersReporting] NRM 3-way split completed:")
+        logging.info(f"[OpenOrdersReporting] - NRM-NRMA: {len(nrm_nrma_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - NRM-NRMPR: {len(nrm_nrmpr_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - NRM-DC: {len(nrm_dc_df)} rows")
+        logging.info(f"[OpenOrdersReporting] - Total: {split_rows}/{total_rows} rows")
+        
+        if split_rows != total_rows:
+            logging.error(f"[OpenOrdersReporting] NRM split validation failed: {split_rows} != {total_rows}")
+            raise Exception("NRM 3-way split validation failed")
+        
+        return {
+            'NRM-NRMA': nrm_nrma_df,
+            'NRM-NRMPR': nrm_nrmpr_df,
+            'NRM-DC': nrm_dc_df
+        }
