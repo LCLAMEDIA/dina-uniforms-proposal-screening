@@ -334,7 +334,7 @@ class StockStatusReportOps:
 
         ssr_summary_wb = load_workbook(io.BytesIO(self.ssr_summary_bytes))
 
-        ssr_summary_sheet = ssr_summary_wb[main_sheet_title]
+        ssr_summary_sheet = ssr_summary_wb.worksheets[0]
 
         new_ssr_summary_dict: Dict[str, Dict] = self.generate_new_ssr_summary(sum_per_client_sheet)
 
