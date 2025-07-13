@@ -1068,7 +1068,7 @@ class OpenOrdersReporting:
             
         logging.info(f"[OpenOrdersReporting] Starting GENERIC sample allocation for {len(generic_df)} samples")
         
-        # Define customer allocation rules based on shipping information
+        # Define customer allocation rules based on shipping information and OurRef
         allocation_rules = {
             'CAL': [
                 'Little Company of Mary Healthcare',
@@ -1094,6 +1094,9 @@ class OpenOrdersReporting:
             ],
             'JS': [
                 'Jetstar Airways'
+            ],
+            'RFDS': [
+                'RFDS'
             ]
         }
         
@@ -1120,6 +1123,12 @@ class OpenOrdersReporting:
                     ship_city_col = self._get_actual_column_name('ShipCity')
                     city_match = generic_df[ship_city_col].astype(str).str.contains(pattern, case=False, na=False)
                     customer_mask |= city_match
+                
+                # Check OurRef using header mapping
+                if self._column_exists(generic_df, 'OurRef'):
+                    our_ref_col = self._get_actual_column_name('OurRef')
+                    ref_match = generic_df[our_ref_col].astype(str).str.contains(pattern, case=False, na=False)
+                    customer_mask |= ref_match
             
             # Extract samples for this customer
             if customer_mask.any():
