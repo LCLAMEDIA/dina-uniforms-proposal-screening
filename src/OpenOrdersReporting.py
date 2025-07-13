@@ -927,6 +927,7 @@ class OpenOrdersReporting:
     def _apply_nrm_3way_split(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
         Apply 3-way splitting for NRM/NRMA products based on Order prefix.
+        Special rule: NRM-DC entries with "NRMA PARKS" in Ship address go to NRM-NRMA file.
         
         Parameters:
         - df: DataFrame containing NRM or NRMA products
@@ -944,12 +945,16 @@ class OpenOrdersReporting:
         
         order_col = self._get_actual_column_name('Order')
         
+        # Check if ShipAddress column exists for NRMA PARKS logic
+        has_ship_address = self._column_exists(df, 'ShipAddress')
+        ship_address_col = self._get_actual_column_name('ShipAddress') if has_ship_address else None
+        
         # Initialize result DataFrames
         nrm_nrma_df = pd.DataFrame()
         nrm_nrmpr_df = pd.DataFrame()
         nrm_dc_df = pd.DataFrame()
         
-        # Split by Order prefix
+        # Split by Order prefix with special NRMA PARKS logic
         for index, row in df.iterrows():
             order_value = row[order_col]
             if pd.notna(order_value):
@@ -960,7 +965,20 @@ class OpenOrdersReporting:
                 elif order_str.startswith('NRMPR-'):
                     nrm_nrmpr_df = pd.concat([nrm_nrmpr_df, row.to_frame().T], ignore_index=True)
                 elif order_str.startswith('DC'):
-                    nrm_dc_df = pd.concat([nrm_dc_df, row.to_frame().T], ignore_index=True)
+                    # Check if this DC order has "NRMA PARKS" in ship address
+                    should_go_to_nrma = False
+                    if has_ship_address:
+                        ship_address_value = row[ship_address_col]
+                        if pd.notna(ship_address_value):
+                            ship_address_str = str(ship_address_value).strip().upper()
+                            if 'NRMA PARKS' in ship_address_str:
+                                should_go_to_nrma = True
+                                logging.info(f"[OpenOrdersReporting] Moving NRM-DC order {order_str} to NRM-NRMA due to 'NRMA PARKS' in ship address")
+                    
+                    if should_go_to_nrma:
+                        nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
+                    else:
+                        nrm_dc_df = pd.concat([nrm_dc_df, row.to_frame().T], ignore_index=True)
                 else:
                     # Fallback for any other NRM products
                     nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
