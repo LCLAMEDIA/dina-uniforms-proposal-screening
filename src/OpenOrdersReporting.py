@@ -548,15 +548,25 @@ class OpenOrdersReporting:
                     
                     # Create product code mask with validation AND space handling
                     try:
-                        # Handle both exact matches and space variations
+                        # Handle both exact matches and space variations in ProductNum column
                         exact_match = remaining_df[product_num_column].astype(str) == product_code
                         prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
                         
-                        # ADDITION: Also check for space-trimmed versions
+                        # ADDITION: Also check for space-trimmed versions in ProductNum
                         exact_match_trimmed = remaining_df[product_num_column].astype(str).str.strip() == product_code.strip()
                         prefix_match_trimmed = remaining_df[product_num_column].astype(str).str.strip().str.startswith(f"{product_code.strip()}-", na=False)
                         
-                        product_mask = exact_match | prefix_match | exact_match_trimmed | prefix_match_trimmed
+                        # NEW: Also check Order column for product code prefix (e.g., WES- orders)
+                        order_mask = pd.Series(False, index=remaining_df.index)
+                        if self._column_exists(remaining_df, 'Order'):
+                            order_col = self._get_actual_column_name('Order')
+                            order_prefix_match = remaining_df[order_col].astype(str).str.startswith(f"{product_code}-", na=False)
+                            order_prefix_match_trimmed = remaining_df[order_col].astype(str).str.strip().str.startswith(f"{product_code.strip()}-", na=False)
+                            order_mask = order_prefix_match | order_prefix_match_trimmed
+                            if order_mask.any():
+                                logging.info(f"[OpenOrdersReporting] Found {order_mask.sum()} rows with '{product_code}-' prefix in Order column")
+                        
+                        product_mask = exact_match | prefix_match | exact_match_trimmed | prefix_match_trimmed | order_mask
                         
                         if product_mask.any():
                             # Extract matching rows to a separate dataframe
