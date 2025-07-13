@@ -519,33 +519,58 @@ class OpenOrdersReporting:
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. UNIVERSAL - Apply universal pattern matching for ALL orders
+            # 4. PRODUCT-BASED - Extract orders by ProductNum for CreateSeparateFile=Yes customers
             product_dataframes = {}
             remaining_df = main_df.copy().reset_index(drop=True)
             
             initial_remaining_count = len(remaining_df)
-            logging.info(f"[OpenOrdersReporting] Starting universal pattern matching. Initial rows: {initial_remaining_count}")
+            logging.info(f"[OpenOrdersReporting] Starting product-based file separation. Initial rows: {initial_remaining_count}")
             
-            # Apply universal pattern matching to allocate orders to customer files
-            allocated_dataframes, remaining_df = self._apply_universal_pattern_matching(remaining_df)
+            # First, extract orders by ProductNum for customers with CreateSeparateFile=Yes
+            product_allocated_dataframes, remaining_df = self._apply_product_based_separation(remaining_df)
             
-            # Add allocated dataframes to product_dataframes
-            for customer_code, customer_df in allocated_dataframes.items():
+            # Add product-based allocated dataframes to product_dataframes
+            for customer_code, customer_df in product_allocated_dataframes.items():
                 if not customer_df.empty:
                     customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
                     product_dataframes[customer_code] = customer_df
                     stats['product_counts'][customer_code] = len(customer_df)
-                    logging.info(f"[OpenOrdersReporting] Universal matching allocated {len(customer_df)} rows to {customer_code}")
+                    logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_df)} rows to {customer_code}")
+            
+            total_product_allocated = sum(len(df) for df in product_allocated_dataframes.values())
+            logging.info(f"[OpenOrdersReporting] Product-based separation completed: {total_product_allocated} rows allocated to {len(product_allocated_dataframes)} customer files")
+            
+            # 5. UNIVERSAL - Apply universal pattern matching to remaining orders
+            logging.info(f"[OpenOrdersReporting] Starting universal pattern matching on remaining {len(remaining_df)} orders")
+            
+            # Apply universal pattern matching to allocate remaining orders to customer files
+            allocated_dataframes, remaining_df = self._apply_universal_pattern_matching(remaining_df)
+            
+            # Add universal pattern matching results to product_dataframes
+            for customer_code, customer_df in allocated_dataframes.items():
+                if not customer_df.empty:
+                    customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
+                    if customer_code in product_dataframes:
+                        # Combine with existing product-based allocation
+                        combined_df = pd.concat([product_dataframes[customer_code], customer_df], ignore_index=True)
+                        product_dataframes[customer_code] = combined_df
+                        stats['product_counts'][customer_code] = len(combined_df)
+                        logging.info(f"[OpenOrdersReporting] Combined {len(customer_df)} universal matching rows with existing {customer_code} (total: {len(combined_df)})")
+                    else:
+                        # New customer file from universal matching
+                        product_dataframes[customer_code] = customer_df
+                        stats['product_counts'][customer_code] = len(customer_df)
+                        logging.info(f"[OpenOrdersReporting] Universal matching allocated {len(customer_df)} rows to {customer_code}")
             
             total_rows_allocated = sum(len(df) for df in allocated_dataframes.values())
             logging.info(f"[OpenOrdersReporting] Universal pattern matching completed: {total_rows_allocated} rows allocated to {len(allocated_dataframes)} customer files")
             
-            # 5. FIFTH - Process the remaining data
+            # 6. SIXTH - Process the remaining data
             # Apply customer/checking note processing to remaining dataframe
             remaining_df = self._apply_processing(remaining_df, "OTHERS")
             stats['remaining_rows'] = len(remaining_df)
             
-            # 6. SIXTH - Prepare for output
+            # 7. SEVENTH - Prepare for output
             # Create structured filename components with robust date handling
             # Use local timezone-aware datetime to ensure correct date
             current_time = datetime.now().astimezone()
@@ -845,6 +870,59 @@ class OpenOrdersReporting:
 
         return sanitized
 
+    def _apply_product_based_separation(self, df: pd.DataFrame) -> tuple:
+        """
+        Extract orders by ProductNum for customers with CreateSeparateFile=Yes.
+        This runs BEFORE universal pattern matching to ensure product-based allocation.
+        
+        Args:
+            df: DataFrame containing all orders to process
+            
+        Returns:
+            tuple: (allocated_orders_dict, remaining_df)
+                - allocated_orders_dict: {customer_code: DataFrame} for each customer with allocated orders
+                - remaining_df: DataFrame with orders that couldn't be allocated by product code
+        """
+        if df.empty:
+            return {}, pd.DataFrame()
+            
+        logging.info(f"[OpenOrdersReporting] Starting product-based separation for {len(df)} orders")
+        
+        allocated_orders = {}
+        unallocated_mask = pd.Series([True] * len(df), index=df.index)
+        
+        # Check if ProductNum column exists
+        if not self._column_exists(df, 'ProductNum'):
+            logging.warning(f"[OpenOrdersReporting] ProductNum column not found, skipping product-based separation")
+            return {}, df.copy()
+            
+        product_col = self._get_actual_column_name('ProductNum')
+        
+        # For each customer that can have separate files
+        for customer_code, rule in self.processing_rules.items():
+            # Only consider customers with separate files enabled
+            if not rule.get('create_separate_file', False):
+                continue
+                
+            # Extract orders where ProductNum starts with customer code
+            customer_mask = df[product_col].astype(str).str.startswith(customer_code, na=False)
+            
+            if customer_mask.any():
+                customer_orders = df[customer_mask & unallocated_mask].copy()
+                if not customer_orders.empty:
+                    allocated_orders[customer_code] = customer_orders
+                    unallocated_mask &= ~customer_mask  # Remove allocated orders from unallocated
+                    
+                    customer_name = rule.get('customer_name', customer_code)
+                    logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_orders)} orders to {customer_code} ({customer_name})")
+        
+        # Orders that couldn't be allocated by product code
+        remaining_orders = df[unallocated_mask].copy()
+        
+        total_allocated = sum(len(df) for df in allocated_orders.values())
+        logging.info(f"[OpenOrdersReporting] Product-based separation complete: {total_allocated} allocated to {len(allocated_orders)} customers, {len(remaining_orders)} remain for universal pattern matching")
+        
+        return allocated_orders, remaining_orders
 
     def _apply_universal_pattern_matching(self, df: pd.DataFrame) -> tuple:
         """
