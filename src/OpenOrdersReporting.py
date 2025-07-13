@@ -596,8 +596,38 @@ class OpenOrdersReporting:
                                     product_dataframes[nrm_variant] = nrm_df
                                     stats['product_counts'][nrm_variant] = len(nrm_df)
                                     logging.info(f"[OpenOrdersReporting] NRM variant '{nrm_variant}': {len(nrm_df)} rows")
+                            elif product_code == "GENERIC":
+                                # Special allocation logic for GENERIC products based on Ship Address
+                                allocated_samples, unallocated_samples = self._allocate_generic_samples(product_df)
+                                
+                                # Add allocated samples to their respective customer files
+                                for target_product_code, allocated_df in allocated_samples.items():
+                                    if target_product_code in product_dataframes:
+                                        # Append to existing customer dataframe
+                                        product_dataframes[target_product_code] = pd.concat([
+                                            product_dataframes[target_product_code], allocated_df
+                                        ], ignore_index=True)
+                                        stats['product_counts'][target_product_code] += len(allocated_df)
+                                        logging.info(f"[OpenOrdersReporting] Allocated {len(allocated_df)} GENERIC samples to existing {target_product_code} file")
+                                    else:
+                                        # Create new customer dataframe for allocated samples
+                                        target_customer_name = self.processing_rules.get(target_product_code, {}).get('customer_name', target_product_code)
+                                        allocated_df = self._apply_processing(allocated_df, target_customer_name)
+                                        product_dataframes[target_product_code] = allocated_df
+                                        stats['product_counts'][target_product_code] = len(allocated_df)
+                                        logging.info(f"[OpenOrdersReporting] Allocated {len(allocated_df)} GENERIC samples to new {target_product_code} file")
+                                
+                                # Handle unallocated samples - add them back to remaining for OTHERS file
+                                if not unallocated_samples.empty:
+                                    # Add unallocated samples back to remaining_df for OTHERS file
+                                    remaining_df = pd.concat([remaining_df, unallocated_samples], ignore_index=True)
+                                    logging.info(f"[OpenOrdersReporting] Added {len(unallocated_samples)} unallocated GENERIC samples to OTHERS file")
+                                
+                                # GENERIC file should be empty since all samples are either allocated to customers or moved to OTHERS
+                                product_df = pd.DataFrame()
+                                logging.info(f"[OpenOrdersReporting] All GENERIC samples processed: {sum(len(df) for df in allocated_samples.values())} allocated to customers, {len(unallocated_samples)} moved to OTHERS")
                             else:
-                                # Apply customer name mapping for non-NRM products
+                                # Apply customer name mapping for non-NRM/non-GENERIC products
                                 customer_name = rule.get('customer_name', product_code)
                                 product_df = self._apply_processing(product_df, customer_name)
                                 
@@ -1020,3 +1050,91 @@ class OpenOrdersReporting:
             'NRM-NRMPR': nrm_nrmpr_df,
             'NRM-DC': nrm_dc_df
         }
+
+    def _allocate_generic_samples(self, generic_df: pd.DataFrame) -> tuple:
+        """
+        Allocate GENERIC samples to appropriate customer files based on shipping information.
+        
+        Args:
+            generic_df: DataFrame containing GENERIC samples
+            
+        Returns:
+            tuple: (allocated_samples_dict, unallocated_samples_df)
+                - allocated_samples_dict: {product_code: allocated_dataframe}
+                - unallocated_samples_df: DataFrame of samples that couldn't be allocated
+        """
+        if generic_df.empty:
+            return {}, pd.DataFrame()
+            
+        logging.info(f"[OpenOrdersReporting] Starting GENERIC sample allocation for {len(generic_df)} samples")
+        
+        # Define customer allocation rules based on shipping information
+        allocation_rules = {
+            'CAL': [
+                'Little Company of Mary Healthcare',
+                'Little Company of Mary Health Care',
+                'CALVARY'
+            ],
+            'END': [
+                'Entrance Leagues Club'
+            ],
+            'KGT': [
+                'KNIGHTS RUGBY LEAGUE',
+                'KNIGHTS'
+            ],
+            'GYM': [
+                'SUTHERLAND DISTRICT TRADE UNION CLUB',
+                'GYMEA TRADIES'
+            ],
+            'COA': [
+                'AMTEK PTY LTD'
+            ],
+            'MTS': [
+                'Metro Trains Sydney'
+            ],
+            'JS': [
+                'Jetstar Airways'
+            ]
+        }
+        
+        allocated_samples = {}
+        unallocated_mask = pd.Series([True] * len(generic_df), index=generic_df.index)
+        
+        for target_code, address_patterns in allocation_rules.items():
+            # Only allocate to customers that have separate file rules
+            if target_code not in self.processing_rules or not self.processing_rules[target_code].get('create_separate_file', False):
+                continue
+                
+            # Create mask for samples matching this customer
+            customer_mask = pd.Series([False] * len(generic_df), index=generic_df.index)
+            
+            for pattern in address_patterns:
+                # Check ShipAddress using header mapping
+                if self._column_exists(generic_df, 'ShipAddress'):
+                    ship_address_col = self._get_actual_column_name('ShipAddress')
+                    address_match = generic_df[ship_address_col].astype(str).str.contains(pattern, case=False, na=False)
+                    customer_mask |= address_match
+                
+                # Check ShipCity using header mapping
+                if self._column_exists(generic_df, 'ShipCity'):
+                    ship_city_col = self._get_actual_column_name('ShipCity')
+                    city_match = generic_df[ship_city_col].astype(str).str.contains(pattern, case=False, na=False)
+                    customer_mask |= city_match
+            
+            # Extract samples for this customer
+            if customer_mask.any():
+                customer_samples = generic_df[customer_mask & unallocated_mask].copy()
+                if not customer_samples.empty:
+                    allocated_samples[target_code] = customer_samples
+                    unallocated_mask &= ~customer_mask  # Remove allocated samples from unallocated
+                    
+                    customer_name = self.processing_rules.get(target_code, {}).get('customer_name', target_code)
+                    logging.info(f"[OpenOrdersReporting] Allocated {len(customer_samples)} GENERIC samples to {target_code} ({customer_name})")
+        
+        # Samples that couldn't be allocated to any customer
+        unallocated_samples = generic_df[unallocated_mask].copy()
+        
+        total_allocated = sum(len(df) for df in allocated_samples.values())
+        logging.info(f"[OpenOrdersReporting] GENERIC allocation complete: {total_allocated} allocated to {len(allocated_samples)} customers, {len(unallocated_samples)} remain unallocated")
+        
+        return allocated_samples, unallocated_samples
