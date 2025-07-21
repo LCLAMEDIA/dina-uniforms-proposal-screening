@@ -7,6 +7,7 @@ import csv
 from typing import Dict, List, Tuple, Any
 import re # Added for regex operations
 import difflib
+from fuzzywuzzy import fuzz
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
@@ -123,6 +124,116 @@ class OpenOrdersReporting:
         if not isinstance(value, str):
             value = str(value)
         return value.strip().upper()
+
+    def _extract_text_segments(self, text: str) -> List[str]:
+        """
+        Extract meaningful segments from text by splitting on delimiters.
+        
+        Args:
+            text: Input text to segment
+            
+        Returns:
+            List of non-empty segments
+        """
+        if not text or pd.isna(text):
+            return []
+        
+        # Define delimiters for splitting
+        delimiters = [' ', '-', '_', '.', ',', '(', ')', '[', ']', '|', '/', '\\', '+', '=']
+        
+        # Start with original text
+        segments = [str(text)]
+        
+        # Split by each delimiter
+        for delimiter in delimiters:
+            new_segments = []
+            for segment in segments:
+                new_segments.extend(segment.split(delimiter))
+            segments = new_segments
+        
+        # Clean and filter segments
+        cleaned_segments = []
+        for segment in segments:
+            cleaned = segment.strip()
+            if cleaned and len(cleaned) >= 2:  # Minimum length for meaningful segments
+                cleaned_segments.append(cleaned.upper())
+        
+        return list(set(cleaned_segments))  # Remove duplicates
+
+    def _is_valid_code_match(self, text: str, code: str) -> bool:
+        """
+        Validates if code appears as a distinct word/segment in text.
+        Code must be surrounded by delimiters or word boundaries to avoid false positives.
+        
+        Args:
+            text: Text to search in
+            code: Code to search for
+            
+        Returns:
+            True if code appears with proper boundaries, False otherwise
+        """
+        if not text or not code or pd.isna(text) or pd.isna(code):
+            return False
+        
+        text_upper = str(text).upper()
+        code_upper = str(code).upper()
+        
+        # Define delimiters that should surround the code
+        delimiters = [' ', '-', '_', '.', ',', '(', ')', '[', ']', '|', '/', '\\', '+', '=']
+        
+        # Find all occurrences of the code in text
+        start = 0
+        while True:
+            pos = text_upper.find(code_upper, start)
+            if pos == -1:
+                break
+            
+            # Check left boundary
+            left_ok = (pos == 0 or text_upper[pos-1] in delimiters)
+            
+            # Check right boundary
+            end = pos + len(code_upper)
+            right_ok = (end == len(text_upper) or text_upper[end] in delimiters)
+            
+            if left_ok and right_ok:
+                return True
+            
+            start = pos + 1
+        
+        return False
+
+    def _fuzzy_match_customer_code(self, text: str, customer_codes: List[str], threshold: int = 90) -> str:
+        """
+        Perform fuzzy matching to find customer codes in text using FuzzyWuzzy.
+        
+        Args:
+            text: Text to search in
+            customer_codes: List of customer codes to match against
+            threshold: Minimum similarity threshold (default 90%)
+            
+        Returns:
+            Matched customer code or None if no match found
+        """
+        if not text or pd.isna(text):
+            return None
+        
+        # Extract segments from text
+        text_segments = self._extract_text_segments(text)
+        
+        for customer_code in customer_codes:
+            # First check if the code appears with proper boundaries (exact match)
+            if self._is_valid_code_match(text, customer_code):
+                logging.info(f"[OpenOrdersReporting] Exact boundary match found: '{customer_code}' in '{text}'")
+                return customer_code
+            
+            # Then check fuzzy matching on segments
+            for segment in text_segments:
+                similarity = fuzz.ratio(segment, customer_code.upper())
+                if similarity >= threshold:
+                    logging.info(f"[OpenOrdersReporting] Fuzzy match found: '{customer_code}' matches '{segment}' with {similarity}% similarity in '{text}'")
+                    return customer_code
+        
+        return None
 
     def _create_header_mapping(self, excel_headers: List[str], required_headers: List[str]) -> Tuple[Dict[str, str], List[str]]:
         """
@@ -519,51 +630,59 @@ class OpenOrdersReporting:
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. PRODUCT-BASED - Extract orders by ProductNum for CreateSeparateFile=Yes customers
+            # 4. FUZZY MATCHING FIRST - Apply universal pattern matching for optimal customer allocation
             product_dataframes = {}
             remaining_df = main_df.copy().reset_index(drop=True)
             
             initial_remaining_count = len(remaining_df)
-            logging.info(f"[OpenOrdersReporting] Starting product-based file separation. Initial rows: {initial_remaining_count}")
+            logging.info(f"[OpenOrdersReporting] Starting fuzzy matching FIRST for optimal allocation. Initial rows: {initial_remaining_count}")
             
-            # First, extract orders by ProductNum for customers with CreateSeparateFile=Yes
-            product_allocated_dataframes, remaining_df = self._apply_product_based_separation(remaining_df)
+            # Apply fuzzy matching FIRST to capture orders with customer codes in OurRef/ShipAddress
+            fuzzy_allocated_dataframes, remaining_df = self._apply_universal_pattern_matching(remaining_df)
             
-            # Add product-based allocated dataframes to product_dataframes
-            for customer_code, customer_df in product_allocated_dataframes.items():
+            # Process fuzzy-allocated dataframes
+            for customer_code, customer_df in fuzzy_allocated_dataframes.items():
                 if not customer_df.empty:
                     customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
                     product_dataframes[customer_code] = customer_df
                     stats['product_counts'][customer_code] = len(customer_df)
-                    logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_df)} rows to {customer_code}")
+                    logging.info(f"[OpenOrdersReporting] Fuzzy matching allocated {len(customer_df)} rows to {customer_code}")
+            
+            total_fuzzy_allocated = sum(len(df) for df in fuzzy_allocated_dataframes.values())
+            logging.info(f"[OpenOrdersReporting] Fuzzy matching completed: {total_fuzzy_allocated} rows allocated to {len(fuzzy_allocated_dataframes)} customer files")
+            
+            # 5. PRODUCT-BASED SECOND - Extract remaining orders by ProductNum for CreateSeparateFile=Yes customers
+            logging.info(f"[OpenOrdersReporting] Starting product-based separation on remaining {len(remaining_df)} orders")
+            
+            # Apply product-based separation to remaining orders
+            product_allocated_dataframes, remaining_df = self._apply_product_based_separation(remaining_df)
+            
+            # Add product-based allocated dataframes to existing customer files or create new ones
+            for customer_code, customer_df in product_allocated_dataframes.items():
+                if not customer_df.empty:
+                    customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
+                    
+                    if customer_code in product_dataframes:
+                        # Combine with existing fuzzy-allocated data
+                        combined_df = pd.concat([product_dataframes[customer_code], customer_df], ignore_index=True)
+                        product_dataframes[customer_code] = combined_df
+                        stats['product_counts'][customer_code] = len(combined_df)
+                        logging.info(f"[OpenOrdersReporting] Combined {len(customer_df)} product-based rows with existing {customer_code} (total: {len(combined_df)})")
+                    else:
+                        # New customer file from product-based allocation
+                        product_dataframes[customer_code] = customer_df
+                        stats['product_counts'][customer_code] = len(customer_df)
+                        logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_df)} rows to {customer_code}")
             
             total_product_allocated = sum(len(df) for df in product_allocated_dataframes.values())
             logging.info(f"[OpenOrdersReporting] Product-based separation completed: {total_product_allocated} rows allocated to {len(product_allocated_dataframes)} customer files")
             
-            # 5. UNIVERSAL - Apply universal pattern matching to remaining orders
-            logging.info(f"[OpenOrdersReporting] Starting universal pattern matching on remaining {len(remaining_df)} orders")
-            
-            # Apply universal pattern matching to allocate remaining orders to customer files
-            allocated_dataframes, remaining_df = self._apply_universal_pattern_matching(remaining_df)
-            
-            # Add universal pattern matching results to product_dataframes
-            for customer_code, customer_df in allocated_dataframes.items():
-                if not customer_df.empty:
-                    customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
-                    if customer_code in product_dataframes:
-                        # Combine with existing product-based allocation
-                        combined_df = pd.concat([product_dataframes[customer_code], customer_df], ignore_index=True)
-                        product_dataframes[customer_code] = combined_df
-                        stats['product_counts'][customer_code] = len(combined_df)
-                        logging.info(f"[OpenOrdersReporting] Combined {len(customer_df)} universal matching rows with existing {customer_code} (total: {len(combined_df)})")
-                    else:
-                        # New customer file from universal matching
-                        product_dataframes[customer_code] = customer_df
-                        stats['product_counts'][customer_code] = len(customer_df)
-                        logging.info(f"[OpenOrdersReporting] Universal matching allocated {len(customer_df)} rows to {customer_code}")
-            
-            total_rows_allocated = sum(len(df) for df in allocated_dataframes.values())
-            logging.info(f"[OpenOrdersReporting] Universal pattern matching completed: {total_rows_allocated} rows allocated to {len(allocated_dataframes)} customer files")
+            # Extract fuzzy matching statistics for the return data
+            fuzzy_matching_stats = {
+                'ourref_matches': 0,
+                'shipaddress_matches': 0, 
+                'total_matched': total_fuzzy_allocated
+            }
             
             # 6. SIXTH - Process the remaining data
             # Apply customer/checking note processing to remaining dataframe
@@ -664,6 +783,7 @@ class OpenOrdersReporting:
                 stats['output_files'][customer_name] = product_filename
             
             # Finalize stats
+            stats['fuzzy_matching'] = fuzzy_matching_stats
             stats['success'] = True
             stats['end_time'] = datetime.now()
             stats['duration'] = (stats['end_time'] - stats['start_time']).total_seconds()
@@ -926,8 +1046,8 @@ class OpenOrdersReporting:
 
     def _apply_universal_pattern_matching(self, df: pd.DataFrame) -> tuple:
         """
-        Apply universal pattern matching for ALL orders based on ShipAddress and OurRef columns.
-        Allocates orders to customer files based on patterns found in ProductMapping configuration.
+        Apply enhanced fuzzy pattern matching for ALL orders based on ShipAddress and OurRef columns.
+        Uses FuzzyWuzzy with 90% threshold and delimiter-aware matching to allocate orders to customer files.
         
         Args:
             df: DataFrame containing all orders to process
@@ -940,77 +1060,102 @@ class OpenOrdersReporting:
         if df.empty:
             return {}, pd.DataFrame()
             
-        logging.info(f"[OpenOrdersReporting] Starting universal pattern matching for {len(df)} orders")
+        logging.info(f"[OpenOrdersReporting] Starting enhanced fuzzy pattern matching for {len(df)} orders")
         
         allocated_orders = {}
         unallocated_mask = pd.Series([True] * len(df), index=df.index)
         
-        # Get columns to check for patterns (ShipAddress and OurRef - columns W and AF)
+        # Get columns to check for patterns (ShipAddress and OurRef)
         check_columns = []
         if self._column_exists(df, 'ShipAddress'):
             check_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
         if self._column_exists(df, 'OurRef'):
             check_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
         
-        # Build patterns from configuration (customer codes and names)
-        allocation_patterns = {}
-        for customer_code, rule in self.processing_rules.items():
-            # Only consider customers with separate files enabled
-            if not rule.get('create_separate_file', False):
+        if not check_columns:
+            logging.warning(f"[OpenOrdersReporting] No ShipAddress or OurRef columns found for fuzzy matching")
+            return {}, df.copy()
+        
+        # Get customer codes for fuzzy matching (only those with separate files enabled)
+        customer_codes = [code for code, rule in self.processing_rules.items() 
+                         if rule.get('create_separate_file', False)]
+        
+        if not customer_codes:
+            logging.info(f"[OpenOrdersReporting] No customer codes configured for separate files")
+            return {}, df.copy()
+        
+        logging.info(f"[OpenOrdersReporting] Customer codes for fuzzy matching: {customer_codes}")
+        
+        # Process each order for fuzzy matching
+        total_matched = 0
+        fuzzy_stats = {'ourref_matches': 0, 'shipaddress_matches': 0, 'total_matched': 0}
+        
+        for index, row in df.iterrows():
+            if not unallocated_mask[index]:  # Skip already allocated orders
                 continue
                 
-            patterns = []
-            # Add the customer code itself as a pattern
-            patterns.append(customer_code)
+            matched_customer = None
+            match_column = None
+            match_text = None
             
-            # Add customer name as pattern (if different from code)
-            customer_name = rule.get('customer_name', '')
-            if customer_name and customer_name != customer_code:
-                patterns.append(customer_name)
-                # Also add parts of customer name (e.g., "CALVARY" from "Calvary (Little Company...)")
-                if '(' in customer_name:
-                    base_name = customer_name.split('(')[0].strip()
-                    if base_name and base_name != customer_code:
-                        patterns.append(base_name)
-                if ')' in customer_name:
-                    parts = customer_name.replace('(', '').replace(')', '').split()
-                    for part in parts:
-                        if len(part) > 3:  # Only add meaningful words
-                            patterns.append(part)
-            
-            allocation_patterns[customer_code] = patterns
-        
-        logging.info(f"[OpenOrdersReporting] Built universal allocation patterns from configuration: {allocation_patterns}")
-        
-        # For each customer that can have separate files
-        for target_code, patterns in allocation_patterns.items():
-            customer_mask = pd.Series([False] * len(df), index=df.index)
-            
-            # Check each pattern against all relevant columns
-            for pattern in patterns:
-                if len(pattern.strip()) < 2:  # Skip very short patterns
+            # Check each column for fuzzy matches
+            for col_name, actual_col_name in check_columns:
+                cell_value = row[actual_col_name]
+                
+                if pd.isna(cell_value) or not str(cell_value).strip():
                     continue
+                
+                # Perform fuzzy matching with 90% threshold
+                matched_code = self._fuzzy_match_customer_code(str(cell_value), customer_codes, threshold=90)
+                
+                if matched_code:
+                    matched_customer = matched_code
+                    match_column = col_name
+                    match_text = str(cell_value)
                     
-                for col_name, actual_col_name in check_columns:
-                    pattern_match = df[actual_col_name].astype(str).str.contains(pattern, case=False, na=False)
-                    if pattern_match.any():
-                        customer_mask |= pattern_match
-                        logging.info(f"[OpenOrdersReporting] Found {pattern_match.sum()} orders matching '{pattern}' in {col_name} for {target_code}")
+                    # Update statistics
+                    if col_name == 'OurRef':
+                        fuzzy_stats['ourref_matches'] += 1
+                    elif col_name == 'ShipAddress':
+                        fuzzy_stats['shipaddress_matches'] += 1
+                    
+                    break  # Found a match, no need to check other columns for this order
             
-            # Extract orders for this customer
-            if customer_mask.any():
-                customer_orders = df[customer_mask & unallocated_mask].copy()
-                if not customer_orders.empty:
-                    allocated_orders[target_code] = customer_orders
-                    unallocated_mask &= ~customer_mask  # Remove allocated orders from unallocated
-                    
-                    customer_name = self.processing_rules.get(target_code, {}).get('customer_name', target_code)
-                    logging.info(f"[OpenOrdersReporting] Allocated {len(customer_orders)} orders to {target_code} ({customer_name})")
+            # Allocate order to matched customer
+            if matched_customer:
+                if matched_customer not in allocated_orders:
+                    allocated_orders[matched_customer] = []
+                
+                allocated_orders[matched_customer].append(index)
+                unallocated_mask[index] = False  # Mark as allocated
+                total_matched += 1
+                
+                customer_name = self.processing_rules.get(matched_customer, {}).get('customer_name', matched_customer)
+                logging.info(f"[OpenOrdersReporting] Order {row.get('Order', index)} matched to {matched_customer} ({customer_name}) via {match_column}: '{match_text}'")
+        
+        # Convert allocated order indices to DataFrames
+        allocated_dataframes = {}
+        for customer_code, order_indices in allocated_orders.items():
+            if order_indices:
+                customer_df = df.loc[order_indices].copy()
+                allocated_dataframes[customer_code] = customer_df
+                
+                customer_name = self.processing_rules.get(customer_code, {}).get('customer_name', customer_code)
+                logging.info(f"[OpenOrdersReporting] Fuzzy matching allocated {len(customer_df)} orders to {customer_code} ({customer_name})")
         
         # Orders that couldn't be allocated to any customer
         remaining_orders = df[unallocated_mask].copy()
         
-        total_allocated = sum(len(df) for df in allocated_orders.values())
-        logging.info(f"[OpenOrdersReporting] Universal pattern matching complete: {total_allocated} allocated to {len(allocated_orders)} customers, {len(remaining_orders)} remain for OTHERS")
+        # Update statistics
+        fuzzy_stats['total_matched'] = total_matched
         
-        return allocated_orders, remaining_orders
+        # Log detailed statistics
+        logging.info(f"[OpenOrdersReporting] Enhanced fuzzy pattern matching complete:")
+        logging.info(f"[OpenOrdersReporting] - Total orders processed: {len(df)}")
+        logging.info(f"[OpenOrdersReporting] - Orders matched via OurRef: {fuzzy_stats['ourref_matches']}")
+        logging.info(f"[OpenOrdersReporting] - Orders matched via ShipAddress: {fuzzy_stats['shipaddress_matches']}")
+        logging.info(f"[OpenOrdersReporting] - Total orders allocated: {fuzzy_stats['total_matched']}")
+        logging.info(f"[OpenOrdersReporting] - Orders remaining for OTHERS: {len(remaining_orders)}")
+        logging.info(f"[OpenOrdersReporting] - Customers with allocated orders: {len(allocated_dataframes)}")
+        
+        return allocated_dataframes, remaining_orders
