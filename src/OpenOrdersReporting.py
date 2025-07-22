@@ -519,152 +519,58 @@ class OpenOrdersReporting:
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
-            # 4. ENHANCED - Split data by product code with validation AND space handling
+            # 4. PRODUCT-BASED - Extract orders by ProductNum for CreateSeparateFile=Yes customers
             product_dataframes = {}
             remaining_df = main_df.copy().reset_index(drop=True)
             
-            if self._column_exists(remaining_df, 'ProductNum'):
-                initial_remaining_count = len(remaining_df)
-                total_rows_moved = 0
-                
-                logging.info(f"[OpenOrdersReporting] Starting product splitting. Initial remaining rows: {initial_remaining_count}")
-                
-                # Process each product code that has processing rules
-                for product_code, rule in self.processing_rules.items():
-                    # Skip if not configured to create a separate file
-                    if not rule.get('create_separate_file', False):
-                        continue
-                    
-                    if not product_code or pd.isna(product_code):
-                        logging.warning(f"[OpenOrdersReporting] Skipping invalid product_code: {product_code}")
-                        continue
-                    
-                    product_code = str(product_code).strip()
-                    if not product_code:
-                        continue
-                    
-                    # Count before split
-                    before_split_count = len(remaining_df)
-                    
-                    # Create product code mask with validation AND space handling
-                    try:
-                        # Handle both exact matches and space variations in ProductNum column
-                        exact_match = remaining_df[product_num_column].astype(str) == product_code
-                        prefix_match = remaining_df[product_num_column].astype(str).str.startswith(f"{product_code}-", na=False)
-                        
-                        # ADDITION: Also check for space-trimmed versions in ProductNum
-                        exact_match_trimmed = remaining_df[product_num_column].astype(str).str.strip() == product_code.strip()
-                        prefix_match_trimmed = remaining_df[product_num_column].astype(str).str.strip().str.startswith(f"{product_code.strip()}-", na=False)
-                        
-                        # NEW: Also check Order column for product code prefix (e.g., WES- orders)
-                        order_mask = pd.Series(False, index=remaining_df.index)
-                        if self._column_exists(remaining_df, 'Order'):
-                            order_col = self._get_actual_column_name('Order')
-                            order_prefix_match = remaining_df[order_col].astype(str).str.startswith(f"{product_code}-", na=False)
-                            order_prefix_match_trimmed = remaining_df[order_col].astype(str).str.strip().str.startswith(f"{product_code.strip()}-", na=False)
-                            order_mask = order_prefix_match | order_prefix_match_trimmed
-                            if order_mask.any():
-                                logging.info(f"[OpenOrdersReporting] Found {order_mask.sum()} rows with '{product_code}-' prefix in Order column")
-                        
-                        product_mask = exact_match | prefix_match | exact_match_trimmed | prefix_match_trimmed | order_mask
-                        
-                        if product_mask.any():
-                            # Extract matching rows to a separate dataframe
-                            product_df = remaining_df[product_mask].copy().reset_index(drop=True)
-                            extracted_count = len(product_df)
-                            
-                            # Remove from remaining dataframe
-                            remaining_df = remaining_df[~product_mask].copy().reset_index(drop=True)
-                            after_split_count = len(remaining_df)
-                            
-                            # Validate the split
-                            expected_remaining = before_split_count - extracted_count
-                            if after_split_count != expected_remaining:
-                                logging.error(f"[OpenOrdersReporting] PRODUCT SPLIT VALIDATION FAILED for {product_code}!")
-                                logging.error(f"[OpenOrdersReporting] Before: {before_split_count}, Extracted: {extracted_count}, After: {after_split_count}, Expected: {expected_remaining}")
-                                raise Exception(f"Product splitting failed validation for {product_code}")
-                            
-                            # Process the extracted data
-                            product_df = self._add_checking_customer_columns(product_df)
-                            
-                            # Special handling for NRM/NRMA products - split by Order prefix
-                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
-                                nrm_dataframes = self._apply_nrm_3way_split(product_df)
-                                # Add each NRM variant to product dataframes
-                                for nrm_variant, nrm_df in nrm_dataframes.items():
-                                    nrm_df = self._apply_processing(nrm_df, nrm_variant)
-                                    product_dataframes[nrm_variant] = nrm_df
-                                    stats['product_counts'][nrm_variant] = len(nrm_df)
-                                    logging.info(f"[OpenOrdersReporting] NRM variant '{nrm_variant}': {len(nrm_df)} rows")
-                            elif product_code == "GENERIC":
-                                # Special allocation logic for GENERIC products based on Ship Address
-                                allocated_samples, unallocated_samples = self._allocate_generic_samples(product_df)
-                                
-                                # Add allocated samples to their respective customer files
-                                for target_product_code, allocated_df in allocated_samples.items():
-                                    if target_product_code in product_dataframes:
-                                        # Append to existing customer dataframe
-                                        product_dataframes[target_product_code] = pd.concat([
-                                            product_dataframes[target_product_code], allocated_df
-                                        ], ignore_index=True)
-                                        stats['product_counts'][target_product_code] += len(allocated_df)
-                                        logging.info(f"[OpenOrdersReporting] Allocated {len(allocated_df)} GENERIC samples to existing {target_product_code} file")
-                                    else:
-                                        # Create new customer dataframe for allocated samples
-                                        target_customer_name = self.processing_rules.get(target_product_code, {}).get('customer_name', target_product_code)
-                                        allocated_df = self._apply_processing(allocated_df, target_customer_name)
-                                        product_dataframes[target_product_code] = allocated_df
-                                        stats['product_counts'][target_product_code] = len(allocated_df)
-                                        logging.info(f"[OpenOrdersReporting] Allocated {len(allocated_df)} GENERIC samples to new {target_product_code} file")
-                                
-                                # Handle unallocated samples - add them back to remaining for OTHERS file
-                                if not unallocated_samples.empty:
-                                    # Add unallocated samples back to remaining_df for OTHERS file
-                                    remaining_df = pd.concat([remaining_df, unallocated_samples], ignore_index=True)
-                                    logging.info(f"[OpenOrdersReporting] Added {len(unallocated_samples)} unallocated GENERIC samples to OTHERS file")
-                                
-                                # GENERIC file should be empty since all samples are either allocated to customers or moved to OTHERS
-                                product_df = pd.DataFrame()
-                                logging.info(f"[OpenOrdersReporting] All GENERIC samples processed: {sum(len(df) for df in allocated_samples.values())} allocated to customers, {len(unallocated_samples)} moved to OTHERS")
-                            else:
-                                # Apply customer name mapping for non-NRM/non-GENERIC products
-                                customer_name = rule.get('customer_name', product_code)
-                                product_df = self._apply_processing(product_df, customer_name)
-                                
-                                # Add to the product dataframes dictionary
-                                product_dataframes[product_code] = product_df
-                                stats['product_counts'][product_code] = len(product_df)
-                                
-                            total_rows_moved += extracted_count
-                            
-                            if product_code.upper().startswith('NRM') or product_code.upper().startswith('NRMA'):
-                                logging.info(f"[OpenOrdersReporting] NRM/NRMA Product '{product_code}': moved {extracted_count} rows and split into 3 variants")
-                            else:
-                                logging.info(f"[OpenOrdersReporting] Product '{product_code}': moved {extracted_count} rows to separate file (Customer: {customer_name})")
-                        else:
-                            logging.info(f"[OpenOrdersReporting] No rows found for product code: {product_code}")
-                            
-                    except Exception as e:
-                        logging.error(f"[OpenOrdersReporting] Error processing product code {product_code}: {e}")
-                        continue
-                
-                # Final validation of product splitting
-                final_remaining_count = len(remaining_df)
-                expected_final_count = initial_remaining_count - total_rows_moved
-                
-                if final_remaining_count != expected_final_count:
-                    logging.error(f"[OpenOrdersReporting] FINAL SPLIT VALIDATION FAILED!")
-                    logging.error(f"[OpenOrdersReporting] Initial: {initial_remaining_count}, Moved: {total_rows_moved}, Final: {final_remaining_count}, Expected: {expected_final_count}")
-                    raise Exception("Product splitting final validation failed")
-                
-                logging.info(f"[OpenOrdersReporting] Product splitting completed successfully: {total_rows_moved} rows moved to {len(product_dataframes)} separate files")
+            initial_remaining_count = len(remaining_df)
+            logging.info(f"[OpenOrdersReporting] Starting product-based file separation. Initial rows: {initial_remaining_count}")
             
-            # 5. FIFTH - Process the remaining data
+            # First, extract orders by ProductNum for customers with CreateSeparateFile=Yes
+            product_allocated_dataframes, remaining_df = self._apply_product_based_separation(remaining_df)
+            
+            # Add product-based allocated dataframes to product_dataframes
+            for customer_code, customer_df in product_allocated_dataframes.items():
+                if not customer_df.empty:
+                    customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
+                    product_dataframes[customer_code] = customer_df
+                    stats['product_counts'][customer_code] = len(customer_df)
+                    logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_df)} rows to {customer_code}")
+            
+            total_product_allocated = sum(len(df) for df in product_allocated_dataframes.values())
+            logging.info(f"[OpenOrdersReporting] Product-based separation completed: {total_product_allocated} rows allocated to {len(product_allocated_dataframes)} customer files")
+            
+            # 5. UNIVERSAL - Apply universal pattern matching to remaining orders
+            logging.info(f"[OpenOrdersReporting] Starting universal pattern matching on remaining {len(remaining_df)} orders")
+            
+            # Apply universal pattern matching to allocate remaining orders to customer files
+            allocated_dataframes, remaining_df = self._apply_universal_pattern_matching(remaining_df)
+            
+            # Add universal pattern matching results to product_dataframes
+            for customer_code, customer_df in allocated_dataframes.items():
+                if not customer_df.empty:
+                    customer_df = self._apply_processing(customer_df, self.processing_rules.get(customer_code, {}).get('customer_name', customer_code))
+                    if customer_code in product_dataframes:
+                        # Combine with existing product-based allocation
+                        combined_df = pd.concat([product_dataframes[customer_code], customer_df], ignore_index=True)
+                        product_dataframes[customer_code] = combined_df
+                        stats['product_counts'][customer_code] = len(combined_df)
+                        logging.info(f"[OpenOrdersReporting] Combined {len(customer_df)} universal matching rows with existing {customer_code} (total: {len(combined_df)})")
+                    else:
+                        # New customer file from universal matching
+                        product_dataframes[customer_code] = customer_df
+                        stats['product_counts'][customer_code] = len(customer_df)
+                        logging.info(f"[OpenOrdersReporting] Universal matching allocated {len(customer_df)} rows to {customer_code}")
+            
+            total_rows_allocated = sum(len(df) for df in allocated_dataframes.values())
+            logging.info(f"[OpenOrdersReporting] Universal pattern matching completed: {total_rows_allocated} rows allocated to {len(allocated_dataframes)} customer files")
+            
+            # 6. SIXTH - Process the remaining data
             # Apply customer/checking note processing to remaining dataframe
             remaining_df = self._apply_processing(remaining_df, "OTHERS")
             stats['remaining_rows'] = len(remaining_df)
             
-            # 6. SIXTH - Prepare for output
+            # 7. SEVENTH - Prepare for output
             # Create structured filename components with robust date handling
             # Use local timezone-aware datetime to ensure correct date
             current_time = datetime.now().astimezone()
@@ -964,177 +870,147 @@ class OpenOrdersReporting:
 
         return sanitized
 
-    def _apply_nrm_3way_split(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    def _apply_product_based_separation(self, df: pd.DataFrame) -> tuple:
         """
-        Apply 3-way splitting for NRM/NRMA products based on Order prefix.
-        Special rule: NRM-DC entries with "NRMA PARKS" in Ship address go to NRM-NRMA file.
-        
-        Parameters:
-        - df: DataFrame containing NRM or NRMA products
-        
-        Returns:
-        - Dict with 3 DataFrames: {'NRM-NRMA': df1, 'NRM-NRMPR': df2, 'NRM-DC': df3}
-        """
-        if df.empty:
-            return {'NRM-NRMA': pd.DataFrame(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
-        
-        # Get the Order column
-        if not self._column_exists(df, 'Order'):
-            logging.warning("[OpenOrdersReporting] Order column not found for NRM splitting. Assigning all to NRM-NRMA")
-            return {'NRM-NRMA': df.copy(), 'NRM-NRMPR': pd.DataFrame(), 'NRM-DC': pd.DataFrame()}
-        
-        order_col = self._get_actual_column_name('Order')
-        
-        # Check if ShipAddress column exists for NRMA PARKS logic
-        has_ship_address = self._column_exists(df, 'ShipAddress')
-        ship_address_col = self._get_actual_column_name('ShipAddress') if has_ship_address else None
-        
-        # Initialize result DataFrames
-        nrm_nrma_df = pd.DataFrame()
-        nrm_nrmpr_df = pd.DataFrame()
-        nrm_dc_df = pd.DataFrame()
-        
-        # Split by Order prefix with special NRMA PARKS logic
-        for index, row in df.iterrows():
-            order_value = row[order_col]
-            if pd.notna(order_value):
-                order_str = str(order_value).strip().upper()
-                
-                if order_str.startswith('NRMA-'):
-                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
-                elif order_str.startswith('NRMPR-'):
-                    nrm_nrmpr_df = pd.concat([nrm_nrmpr_df, row.to_frame().T], ignore_index=True)
-                elif order_str.startswith('DC'):
-                    # Check if this DC order has "NRMA PARKS" in ship address
-                    should_go_to_nrma = False
-                    if has_ship_address:
-                        ship_address_value = row[ship_address_col]
-                        if pd.notna(ship_address_value):
-                            ship_address_str = str(ship_address_value).strip().upper()
-                            if 'NRMA PARKS' in ship_address_str:
-                                should_go_to_nrma = True
-                                logging.info(f"[OpenOrdersReporting] Moving NRM-DC order {order_str} to NRM-NRMA due to 'NRMA PARKS' in ship address")
-                    
-                    if should_go_to_nrma:
-                        nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
-                    else:
-                        nrm_dc_df = pd.concat([nrm_dc_df, row.to_frame().T], ignore_index=True)
-                else:
-                    # Fallback for any other NRM products
-                    nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
-            else:
-                # No order value, fallback to NRM-NRMA
-                nrm_nrma_df = pd.concat([nrm_nrma_df, row.to_frame().T], ignore_index=True)
-        
-        # Reset indexes
-        nrm_nrma_df = nrm_nrma_df.reset_index(drop=True)
-        nrm_nrmpr_df = nrm_nrmpr_df.reset_index(drop=True)
-        nrm_dc_df = nrm_dc_df.reset_index(drop=True)
-        
-        # Log split results
-        total_rows = len(df)
-        split_rows = len(nrm_nrma_df) + len(nrm_nrmpr_df) + len(nrm_dc_df)
-        
-        logging.info(f"[OpenOrdersReporting] NRM 3-way split completed:")
-        logging.info(f"[OpenOrdersReporting] - NRM-NRMA: {len(nrm_nrma_df)} rows")
-        logging.info(f"[OpenOrdersReporting] - NRM-NRMPR: {len(nrm_nrmpr_df)} rows")
-        logging.info(f"[OpenOrdersReporting] - NRM-DC: {len(nrm_dc_df)} rows")
-        logging.info(f"[OpenOrdersReporting] - Total: {split_rows}/{total_rows} rows")
-        
-        if split_rows != total_rows:
-            logging.error(f"[OpenOrdersReporting] NRM split validation failed: {split_rows} != {total_rows}")
-            raise Exception("NRM 3-way split validation failed")
-        
-        return {
-            'NRM-NRMA': nrm_nrma_df,
-            'NRM-NRMPR': nrm_nrmpr_df,
-            'NRM-DC': nrm_dc_df
-        }
-
-    def _allocate_generic_samples(self, generic_df: pd.DataFrame) -> tuple:
-        """
-        Allocate GENERIC samples to appropriate customer files based on shipping information.
+        Extract orders by ProductNum for customers with CreateSeparateFile=Yes.
+        This runs BEFORE universal pattern matching to ensure product-based allocation.
         
         Args:
-            generic_df: DataFrame containing GENERIC samples
+            df: DataFrame containing all orders to process
             
         Returns:
-            tuple: (allocated_samples_dict, unallocated_samples_df)
-                - allocated_samples_dict: {product_code: allocated_dataframe}
-                - unallocated_samples_df: DataFrame of samples that couldn't be allocated
+            tuple: (allocated_orders_dict, remaining_df)
+                - allocated_orders_dict: {customer_code: DataFrame} for each customer with allocated orders
+                - remaining_df: DataFrame with orders that couldn't be allocated by product code
         """
-        if generic_df.empty:
+        if df.empty:
             return {}, pd.DataFrame()
             
-        logging.info(f"[OpenOrdersReporting] Starting GENERIC sample allocation for {len(generic_df)} samples")
+        logging.info(f"[OpenOrdersReporting] Starting product-based separation for {len(df)} orders")
         
-        # Define customer allocation rules based on shipping information
-        allocation_rules = {
-            'CAL': [
-                'Little Company of Mary Healthcare',
-                'Little Company of Mary Health Care',
-                'CALVARY'
-            ],
-            'END': [
-                'Entrance Leagues Club'
-            ],
-            'KGT': [
-                'KNIGHTS RUGBY LEAGUE',
-                'KNIGHTS'
-            ],
-            'GYM': [
-                'SUTHERLAND DISTRICT TRADE UNION CLUB',
-                'GYMEA TRADIES'
-            ],
-            'COA': [
-                'AMTEK PTY LTD'
-            ],
-            'MTS': [
-                'Metro Trains Sydney'
-            ],
-            'JS': [
-                'Jetstar Airways'
-            ]
-        }
+        allocated_orders = {}
+        unallocated_mask = pd.Series([True] * len(df), index=df.index)
         
-        allocated_samples = {}
-        unallocated_mask = pd.Series([True] * len(generic_df), index=generic_df.index)
+        # Check if ProductNum column exists
+        if not self._column_exists(df, 'ProductNum'):
+            logging.warning(f"[OpenOrdersReporting] ProductNum column not found, skipping product-based separation")
+            return {}, df.copy()
+            
+        product_col = self._get_actual_column_name('ProductNum')
         
-        for target_code, address_patterns in allocation_rules.items():
-            # Only allocate to customers that have separate file rules
-            if target_code not in self.processing_rules or not self.processing_rules[target_code].get('create_separate_file', False):
+        # For each customer that can have separate files
+        for customer_code, rule in self.processing_rules.items():
+            # Only consider customers with separate files enabled
+            if not rule.get('create_separate_file', False):
                 continue
                 
-            # Create mask for samples matching this customer
-            customer_mask = pd.Series([False] * len(generic_df), index=generic_df.index)
+            # Extract orders where ProductNum starts with customer code
+            customer_mask = df[product_col].astype(str).str.startswith(customer_code, na=False)
             
-            for pattern in address_patterns:
-                # Check ShipAddress using header mapping
-                if self._column_exists(generic_df, 'ShipAddress'):
-                    ship_address_col = self._get_actual_column_name('ShipAddress')
-                    address_match = generic_df[ship_address_col].astype(str).str.contains(pattern, case=False, na=False)
-                    customer_mask |= address_match
-                
-                # Check ShipCity using header mapping
-                if self._column_exists(generic_df, 'ShipCity'):
-                    ship_city_col = self._get_actual_column_name('ShipCity')
-                    city_match = generic_df[ship_city_col].astype(str).str.contains(pattern, case=False, na=False)
-                    customer_mask |= city_match
-            
-            # Extract samples for this customer
             if customer_mask.any():
-                customer_samples = generic_df[customer_mask & unallocated_mask].copy()
-                if not customer_samples.empty:
-                    allocated_samples[target_code] = customer_samples
-                    unallocated_mask &= ~customer_mask  # Remove allocated samples from unallocated
+                customer_orders = df[customer_mask & unallocated_mask].copy()
+                if not customer_orders.empty:
+                    allocated_orders[customer_code] = customer_orders
+                    unallocated_mask &= ~customer_mask  # Remove allocated orders from unallocated
+                    
+                    customer_name = rule.get('customer_name', customer_code)
+                    logging.info(f"[OpenOrdersReporting] Product-based separation allocated {len(customer_orders)} orders to {customer_code} ({customer_name})")
+        
+        # Orders that couldn't be allocated by product code
+        remaining_orders = df[unallocated_mask].copy()
+        
+        total_allocated = sum(len(df) for df in allocated_orders.values())
+        logging.info(f"[OpenOrdersReporting] Product-based separation complete: {total_allocated} allocated to {len(allocated_orders)} customers, {len(remaining_orders)} remain for universal pattern matching")
+        
+        return allocated_orders, remaining_orders
+
+    def _apply_universal_pattern_matching(self, df: pd.DataFrame) -> tuple:
+        """
+        Apply universal pattern matching for ALL orders based on ShipAddress and OurRef columns.
+        Allocates orders to customer files based on patterns found in ProductMapping configuration.
+        
+        Args:
+            df: DataFrame containing all orders to process
+            
+        Returns:
+            tuple: (allocated_orders_dict, remaining_orders_df)
+                - allocated_orders_dict: {customer_code: allocated_dataframe}
+                - remaining_orders_df: DataFrame of orders that couldn't be allocated
+        """
+        if df.empty:
+            return {}, pd.DataFrame()
+            
+        logging.info(f"[OpenOrdersReporting] Starting universal pattern matching for {len(df)} orders")
+        
+        allocated_orders = {}
+        unallocated_mask = pd.Series([True] * len(df), index=df.index)
+        
+        # Get columns to check for patterns (ShipAddress and OurRef - columns W and AF)
+        check_columns = []
+        if self._column_exists(df, 'ShipAddress'):
+            check_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
+        if self._column_exists(df, 'OurRef'):
+            check_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
+        
+        # Build patterns from configuration (customer codes and names)
+        allocation_patterns = {}
+        for customer_code, rule in self.processing_rules.items():
+            # Only consider customers with separate files enabled
+            if not rule.get('create_separate_file', False):
+                continue
+                
+            patterns = []
+            # Add the customer code itself as a pattern
+            patterns.append(customer_code)
+            
+            # Add customer name as pattern (if different from code)
+            customer_name = rule.get('customer_name', '')
+            if customer_name and customer_name != customer_code:
+                patterns.append(customer_name)
+                # Also add parts of customer name (e.g., "CALVARY" from "Calvary (Little Company...)")
+                if '(' in customer_name:
+                    base_name = customer_name.split('(')[0].strip()
+                    if base_name and base_name != customer_code:
+                        patterns.append(base_name)
+                if ')' in customer_name:
+                    parts = customer_name.replace('(', '').replace(')', '').split()
+                    for part in parts:
+                        if len(part) > 3:  # Only add meaningful words
+                            patterns.append(part)
+            
+            allocation_patterns[customer_code] = patterns
+        
+        logging.info(f"[OpenOrdersReporting] Built universal allocation patterns from configuration: {allocation_patterns}")
+        
+        # For each customer that can have separate files
+        for target_code, patterns in allocation_patterns.items():
+            customer_mask = pd.Series([False] * len(df), index=df.index)
+            
+            # Check each pattern against all relevant columns
+            for pattern in patterns:
+                if len(pattern.strip()) < 2:  # Skip very short patterns
+                    continue
+                    
+                for col_name, actual_col_name in check_columns:
+                    pattern_match = df[actual_col_name].astype(str).str.contains(pattern, case=False, na=False)
+                    if pattern_match.any():
+                        customer_mask |= pattern_match
+                        logging.info(f"[OpenOrdersReporting] Found {pattern_match.sum()} orders matching '{pattern}' in {col_name} for {target_code}")
+            
+            # Extract orders for this customer
+            if customer_mask.any():
+                customer_orders = df[customer_mask & unallocated_mask].copy()
+                if not customer_orders.empty:
+                    allocated_orders[target_code] = customer_orders
+                    unallocated_mask &= ~customer_mask  # Remove allocated orders from unallocated
                     
                     customer_name = self.processing_rules.get(target_code, {}).get('customer_name', target_code)
-                    logging.info(f"[OpenOrdersReporting] Allocated {len(customer_samples)} GENERIC samples to {target_code} ({customer_name})")
+                    logging.info(f"[OpenOrdersReporting] Allocated {len(customer_orders)} orders to {target_code} ({customer_name})")
         
-        # Samples that couldn't be allocated to any customer
-        unallocated_samples = generic_df[unallocated_mask].copy()
+        # Orders that couldn't be allocated to any customer
+        remaining_orders = df[unallocated_mask].copy()
         
-        total_allocated = sum(len(df) for df in allocated_samples.values())
-        logging.info(f"[OpenOrdersReporting] GENERIC allocation complete: {total_allocated} allocated to {len(allocated_samples)} customers, {len(unallocated_samples)} remain unallocated")
+        total_allocated = sum(len(df) for df in allocated_orders.values())
+        logging.info(f"[OpenOrdersReporting] Universal pattern matching complete: {total_allocated} allocated to {len(allocated_orders)} customers, {len(remaining_orders)} remain for OTHERS")
         
-        return allocated_samples, unallocated_samples
+        return allocated_orders, remaining_orders
