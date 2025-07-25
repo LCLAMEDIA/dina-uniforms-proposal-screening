@@ -247,7 +247,7 @@ class StockStatusReportOps:
 
         main_sheet_title = f"JULY {fiscal_year_start} - JUNE {fiscal_year_end} FY"
 
-        ssr_summary_df = pd.read_excel(io.BytesIO(ssr_summary_bytes), sheet_name=main_sheet_title, header=None, engine='openpyxl')
+        ssr_summary_df = pd.read_excel(io.BytesIO(ssr_summary_bytes), sheet_name=0, header=None, engine='openpyxl')
 
         return ssr_summary_df
 
@@ -334,7 +334,7 @@ class StockStatusReportOps:
 
         ssr_summary_wb = load_workbook(io.BytesIO(self.ssr_summary_bytes))
 
-        ssr_summary_sheet = ssr_summary_wb[main_sheet_title]
+        ssr_summary_sheet = ssr_summary_wb.worksheets[0]
 
         new_ssr_summary_dict: Dict[str, Dict] = self.generate_new_ssr_summary(sum_per_client_sheet)
 
