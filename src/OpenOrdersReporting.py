@@ -7,6 +7,7 @@ import csv
 from typing import Dict, List, Tuple, Any
 import re # Added for regex operations
 import difflib
+from rapidfuzz import fuzz
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
@@ -873,6 +874,7 @@ class OpenOrdersReporting:
     def _apply_product_based_separation(self, df: pd.DataFrame) -> tuple:
         """
         Extract orders by ProductNum for customers with CreateSeparateFile=Yes.
+        Searches for exact matches in Order, ProductNum, ShipAddress, and OurRef headers with normalization.
         This runs BEFORE universal pattern matching to ensure product-based allocation.
         
         Args:
@@ -891,21 +893,87 @@ class OpenOrdersReporting:
         allocated_orders = {}
         unallocated_mask = pd.Series([True] * len(df), index=df.index)
         
-        # Check if ProductNum column exists
-        if not self._column_exists(df, 'ProductNum'):
-            logging.warning(f"[OpenOrdersReporting] ProductNum column not found, skipping product-based separation")
+        # Define columns to search for customer codes
+        search_columns = []
+        for col in ['Order', 'ProductNum', 'ShipAddress', 'OurRef']:
+            if self._column_exists(df, col):
+                search_columns.append((col, self._get_actual_column_name(col)))
+        
+        if not search_columns:
+            logging.warning(f"[OpenOrdersReporting] No searchable columns found (Order, ProductNum, ShipAddress, OurRef), skipping product-based separation")
             return {}, df.copy()
-            
-        product_col = self._get_actual_column_name('ProductNum')
+        
+        logging.info(f"[OpenOrdersReporting] Searching in columns: {[col[0] for col in search_columns]}")
         
         # For each customer that can have separate files
         for customer_code, rule in self.processing_rules.items():
             # Only consider customers with separate files enabled
             if not rule.get('create_separate_file', False):
                 continue
+            
+            # Normalize customer code for comparison
+            normalized_customer_code = self._normalize_string(customer_code)
+            customer_mask = pd.Series([False] * len(df), index=df.index)
+            
+            # Check each search column for exact matches
+            for col_name, actual_col_name in search_columns:
+                # Normalize column values and check for exact matches
+                normalized_col = df[actual_col_name].apply(lambda x: self._normalize_string(x) if pd.notna(x) else "")
                 
-            # Extract orders where ProductNum starts with customer code
-            customer_mask = df[product_col].astype(str).str.startswith(customer_code, na=False)
+                # Exact match
+                exact_match = normalized_col == normalized_customer_code
+                
+                # Prefix match for ProductNum (e.g., GENERIC-SAMPLE-123)
+                if col_name == 'ProductNum':
+                    prefix_match = normalized_col.str.startswith(f"{normalized_customer_code}-", na=False)
+                    col_match = exact_match | prefix_match
+                else:
+                    col_match = exact_match
+                
+                if col_match.any():
+                    customer_mask |= col_match
+                    logging.info(f"[OpenOrdersReporting] Found {col_match.sum()} exact matches for '{customer_code}' in {col_name}")
+            
+            # Add fuzzy matching for CustomerName and Code in ShipAddress and OurRef with 90% threshold
+            customer_name = rule.get('customer_name', customer_code)
+            fuzzy_matches = pd.Series([False] * len(df), index=df.index)
+            
+            # Define columns to check for fuzzy matching
+            fuzzy_columns = []
+            if self._column_exists(df, 'ShipAddress'):
+                fuzzy_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
+            if self._column_exists(df, 'OurRef'):
+                fuzzy_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
+            
+            # Check fuzzy matching for customer code (requires word boundaries)
+            for col_name, actual_col_name in fuzzy_columns:
+                for idx, value in enumerate(df[actual_col_name]):
+                    if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
+                        value_upper = value.upper()
+                        code_upper = customer_code.upper()
+                        
+                        # Code matching: Check if code appears with word boundaries (space, slash, start/end)
+                        import re
+                        code_pattern = r'\b' + re.escape(code_upper) + r'\b|/' + re.escape(code_upper) + r'[\s/]|[\s/]' + re.escape(code_upper) + r'/'
+                        if re.search(code_pattern, value_upper):
+                            fuzzy_matches.iloc[idx] = True
+            
+            # Check fuzzy matching for customer name (partial matching allowed)
+            if customer_name and customer_name.strip():
+                for col_name, actual_col_name in fuzzy_columns:
+                    for idx, value in enumerate(df[actual_col_name]):
+                        if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
+                            # CustomerName matching: Use partial ratio for full names
+                            similarity = fuzz.partial_ratio(customer_name.upper(), value.upper())
+                            if similarity >= 90:
+                                fuzzy_matches.iloc[idx] = True
+            
+            if fuzzy_matches.any():
+                customer_mask |= fuzzy_matches
+                patterns = [customer_code]
+                if customer_name and customer_name.strip():
+                    patterns.append(customer_name)
+                logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} fuzzy matches for patterns {patterns} in {[col[0] for col in fuzzy_columns]} (Code: word boundaries, Name: ≥90%)")
             
             if customer_mask.any():
                 customer_orders = df[customer_mask & unallocated_mask].copy()
