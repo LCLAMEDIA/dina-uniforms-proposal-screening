@@ -934,23 +934,46 @@ class OpenOrdersReporting:
                     customer_mask |= col_match
                     logging.info(f"[OpenOrdersReporting] Found {col_match.sum()} exact matches for '{customer_code}' in {col_name}")
             
-            # Add fuzzy matching for CustomerName in ShipAddress with 95% threshold
+            # Add fuzzy matching for CustomerName and Code in ShipAddress and OurRef with 90% threshold
             customer_name = rule.get('customer_name', customer_code)
-            if customer_name and customer_name.strip() and self._column_exists(df, 'ShipAddress'):
-                ship_address_col = self._get_actual_column_name('ShipAddress')
-                fuzzy_matches = pd.Series([False] * len(df), index=df.index)
-                
-                # Check fuzzy matching against ALL unallocated orders (not just exact matches)
-                for idx, address in enumerate(df[ship_address_col]):
-                    if unallocated_mask.iloc[idx] and pd.notna(address) and isinstance(address, str):
-                        # Use rapidfuzz to compare customer name with ship address
-                        similarity = fuzz.partial_ratio(customer_name.upper(), address.upper())
-                        if similarity >= 90:
+            fuzzy_matches = pd.Series([False] * len(df), index=df.index)
+            
+            # Define columns to check for fuzzy matching
+            fuzzy_columns = []
+            if self._column_exists(df, 'ShipAddress'):
+                fuzzy_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
+            if self._column_exists(df, 'OurRef'):
+                fuzzy_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
+            
+            # Check fuzzy matching for customer code (requires word boundaries)
+            for col_name, actual_col_name in fuzzy_columns:
+                for idx, value in enumerate(df[actual_col_name]):
+                    if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
+                        value_upper = value.upper()
+                        code_upper = customer_code.upper()
+                        
+                        # Code matching: Check if code appears with word boundaries (space, slash, start/end)
+                        import re
+                        code_pattern = r'\b' + re.escape(code_upper) + r'\b|/' + re.escape(code_upper) + r'[\s/]|[\s/]' + re.escape(code_upper) + r'/'
+                        if re.search(code_pattern, value_upper):
                             fuzzy_matches.iloc[idx] = True
-                
-                if fuzzy_matches.any():
-                    customer_mask |= fuzzy_matches
-                    logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} fuzzy matches (≥90%) for CustomerName '{customer_name}' in ShipAddress")
+            
+            # Check fuzzy matching for customer name (partial matching allowed)
+            if customer_name and customer_name.strip():
+                for col_name, actual_col_name in fuzzy_columns:
+                    for idx, value in enumerate(df[actual_col_name]):
+                        if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
+                            # CustomerName matching: Use partial ratio for full names
+                            similarity = fuzz.partial_ratio(customer_name.upper(), value.upper())
+                            if similarity >= 90:
+                                fuzzy_matches.iloc[idx] = True
+            
+            if fuzzy_matches.any():
+                customer_mask |= fuzzy_matches
+                patterns = [customer_code]
+                if customer_name and customer_name.strip():
+                    patterns.append(customer_name)
+                logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} fuzzy matches for patterns {patterns} in {[col[0] for col in fuzzy_columns]} (Code: word boundaries, Name: ≥90%)")
             
             if customer_mask.any():
                 customer_orders = df[customer_mask & unallocated_mask].copy()
