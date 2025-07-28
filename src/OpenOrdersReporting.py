@@ -7,6 +7,7 @@ import csv
 from typing import Dict, List, Tuple, Any
 import re # Added for regex operations
 import difflib
+from rapidfuzz import fuzz
 
 from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
@@ -931,7 +932,25 @@ class OpenOrdersReporting:
                 
                 if col_match.any():
                     customer_mask |= col_match
-                    logging.info(f"[OpenOrdersReporting] Found {col_match.sum()} matches for '{customer_code}' in {col_name}")
+                    logging.info(f"[OpenOrdersReporting] Found {col_match.sum()} exact matches for '{customer_code}' in {col_name}")
+            
+            # Add fuzzy matching for CustomerName in ShipAddress with 95% threshold
+            customer_name = rule.get('customer_name', customer_code)
+            if customer_name and customer_name.strip() and self._column_exists(df, 'ShipAddress'):
+                ship_address_col = self._get_actual_column_name('ShipAddress')
+                fuzzy_matches = pd.Series([False] * len(df), index=df.index)
+                
+                # Check fuzzy matching against ALL unallocated orders (not just exact matches)
+                for idx, address in enumerate(df[ship_address_col]):
+                    if unallocated_mask.iloc[idx] and pd.notna(address) and isinstance(address, str):
+                        # Use rapidfuzz to compare customer name with ship address
+                        similarity = fuzz.partial_ratio(customer_name.upper(), address.upper())
+                        if similarity >= 90:
+                            fuzzy_matches.iloc[idx] = True
+                
+                if fuzzy_matches.any():
+                    customer_mask |= fuzzy_matches
+                    logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} fuzzy matches (≥90%) for CustomerName '{customer_name}' in ShipAddress")
             
             if customer_mask.any():
                 customer_orders = df[customer_mask & unallocated_mask].copy()
