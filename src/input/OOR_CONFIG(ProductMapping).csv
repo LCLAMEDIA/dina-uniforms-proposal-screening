@@ -1,0 +1,49 @@
+"INSTRUCTIONS FOR PRODUCTMAPPING SHEET:
+- This mapping table converts product codes to customer names and controls how their orders are processed. This is for ACTIVE CUSTOMERS you still work with.
+
+How to use this table:
+
+- 'Code' column: Enter the product code prefix that appears before the first hyphen in ProductNum (e.g., 'CAL-UNIFORM-001' ? 'CAL')
+- 'CustomerName' column: Enter the full customer name to display in reports
+- 'CreateSeparateFile' column:
+    Enter 'Yes' to create a dedicated CSV file just for this customer
+    Enter 'No' to include them in the main ""OTHERS"" file with everyone else
+- 'VendorCleanup' column:
+    Enter vendor name (e.g., 'PNW') to keep only that vendor and remove the vendor name from final output
+    Leave blank for normal processing without vendor filtering
+- 'Description/Notes' column: For your reference only - add any notes you want
+
+What happens to these customers:
+- All orders are processed and included in your reports
+- Separate CSV files created if you chose 'Yes' for CreateSeparateFile
+- Orders appear in reports with the CustomerName you specified
+- Vendor filtering applied if VendorCleanup has a value
+
+?? CRITICAL RULES:
+- Only put ACTIVE customers here - customers you still work with and want to see in reports
+- Do NOT put former customers here - those belong in the BrandCodes sheet to be removed completely
+- Every row must have a Code AND CustomerName - don't leave these empty
+
+Examples:
+- ? Correct: Put 'GENERIC' here with VendorCleanup='PNW' to filter vendors for sample products
+- ? Correct: Put 'CAL' here if Calvary is still an active customer and you want their separate report
+- ? Correct: Leave VendorCleanup blank for customers that don't need vendor filtering
+- ? Wrong: Put 'CAL' here AND in BrandCodes sheet - this creates conflicts
+
+When to use ProductMapping vs BrandCodes:
+- ProductMapping: Current/active customers ? Process their orders and create reports
+- BrandCodes: Former customers ? Delete their orders completely
+
+VendorCleanup Examples:
+- 'PNW' ? Keep only PNW vendor entries, remove ""PNW"" from vendor names
+- 'DINA' ? Keep only DINA vendor entries, remove ""DINA"" from vendor names  
+- Blank ? No vendor filtering, process all vendors normally
+
+IMPORTANT: DO NOT list the same customer in both sheets. Moving or changing the header row (Row 2) will cause the program to fail. Keep the structure: Row 1 for instructions, Row 2 for headers, Row 3+ for data.",,,
+Code,CustomerName,CreateSeparateFile,Description/Notes
+CAL,Calvary (Little Company of Mary Health Care),yes,
+WES,WESTFIELD,yes,
+NRMA-PR,NRMA Parks & Resorts,yes,
+NRMA,,yes,
+MTS,Metro Trans Sydney,yes,
+RFDS,RFDS,yes,

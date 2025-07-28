@@ -152,22 +152,27 @@ def create_test_config(output_path="test_config.xlsx"):
     logger = logging.getLogger('OORTest')
     logger.info(f"Creating test configuration file at {output_path}")
     
-    # Create a dummy config reader to get default values
-    config_reader = ConfigurationReader()
+    # Define test configuration values for fuzzy matching demo
+    test_official_brands = ['BIS', 'OLD']  # Brands to filter out
+    test_product_mapping = {
+        'SAK': 'Calvary (Little Company of Mary)',
+        'NRM': 'NRMA Parks & Resorts',
+        'RUM': 'Richmond United'
+    }
+    test_separate_file_customers = ['SAK', 'NRM', 'RUM']  # All customers get separate files for demo
     
     # Create OfficialBrands sheet
     official_brands_df = pd.DataFrame({
-        'BrandCode': config_reader.default_official_brands,
-        'Description': [f"Brand {b}" for b in config_reader.default_official_brands]
+        'BrandCode': test_official_brands,
+        'Description': [f"Brand {b}" for b in test_official_brands]
     })
     
     # Create CustomerCodeMapping sheet
-    customer_codes = list(config_reader.default_product_num_mapping.keys())
-    customer_names = list(config_reader.default_product_num_mapping.values())
-    separate_file = ['Yes' if code in config_reader.default_separate_file_customers else 'No' 
+    customer_codes = list(test_product_mapping.keys())
+    customer_names = list(test_product_mapping.values())
+    separate_file = ['Yes' if code in test_separate_file_customers else 'No' 
                      for code in customer_codes]
-    dedup_customers = ['Yes' if code in config_reader.default_dedup_customers else 'No' 
-                      for code in customer_codes]
+    dedup_customers = ['No' for _ in customer_codes]  # No deduplication for demo
     
     customer_mapping_df = pd.DataFrame({
         'Code': customer_codes,
@@ -280,12 +285,19 @@ def main():
         # Output the results
         logger.info("Processing completed successfully")
         logger.info(f"Total rows processed: {result['total_rows']}")
-        logger.info(f"Generic rows: {result['generic_rows']}")
-        logger.info(f"Calvary rows: {result['calvary_rows']}")
         logger.info(f"Former customer rows: {result['filtered_brand_rows']}")
         logger.info(f"Duplicate orders removed: {result.get('duplicate_orders_removed', 0)}")
         logger.info(f"Other rows: {result['remaining_rows']}")
         logger.info(f"Output files: {', '.join(result['output_files'].values())}")
+        
+        # Display fuzzy matching statistics if available
+        if 'fuzzy_matching' in result:
+            fuzzy_stats = result['fuzzy_matching']
+            logger.info(f"Fuzzy matching results:")
+            logger.info(f"  - OurRef matches: {fuzzy_stats.get('ourref_matches', 0)}")
+            logger.info(f"  - ShipAddress matches: {fuzzy_stats.get('shipaddress_matches', 0)}")
+            logger.info(f"  - Total matched: {fuzzy_stats.get('total_matched', 0)}")
+        
         logger.info(f"Processing time: {result['duration']:.2f} seconds")
         
     except Exception as e:
@@ -305,6 +317,10 @@ class mock_sharepoint_operations:
         # Setup patching for SharePointOperations
         import builtins
         self.original_import = builtins.__import__
+        
+        # Capture config variables for the closure
+        config_file = self.config_file
+        use_sharepoint_config = self.use_sharepoint_config
         
         def patched_import(name, *args, **kwargs):
             module = self.original_import(name, *args, **kwargs)
@@ -332,15 +348,15 @@ class mock_sharepoint_operations:
                         return "mock-drive-id"
                     
                     def mocked_list_items_in_folder(self, drive_id, folder_path):
-                        if self.use_sharepoint_config:
+                        if use_sharepoint_config:
                             # Return the SharePoint OOR_CONFIG path
                             return [{"name": "OOR_CONFIG.xlsx", "id": "mock-config-id", "path": OOR_CONFIG_PATH}]
-                        elif self.config_file:
+                        elif config_file:
                             return [{"name": "OOR_CONFIG.xlsx", "id": "mock-config-id"}]
                         return []
                     
                     def mocked_get_file_content(self, drive_id, item_id):
-                        if self.use_sharepoint_config:
+                        if use_sharepoint_config:
                             # Try to read from the SharePoint OOR_CONFIG path
                             try:
                                 with open(OOR_CONFIG_PATH, 'rb') as f:
@@ -349,8 +365,8 @@ class mock_sharepoint_operations:
                                 logger = logging.getLogger('OORTest')
                                 logger.error(f"SharePoint OOR_CONFIG file not found at {OOR_CONFIG_PATH}")
                                 return None
-                        elif self.config_file and item_id == "mock-config-id":
-                            with open(self.config_file, 'rb') as f:
+                        elif config_file and item_id == "mock-config-id":
+                            with open(config_file, 'rb') as f:
                                 return f.read()
                         return None
                     
