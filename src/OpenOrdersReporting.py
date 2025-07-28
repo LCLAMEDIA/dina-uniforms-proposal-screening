@@ -873,6 +873,7 @@ class OpenOrdersReporting:
     def _apply_product_based_separation(self, df: pd.DataFrame) -> tuple:
         """
         Extract orders by ProductNum for customers with CreateSeparateFile=Yes.
+        Searches for exact matches in Order, ProductNum, ShipAddress, and OurRef headers with normalization.
         This runs BEFORE universal pattern matching to ensure product-based allocation.
         
         Args:
@@ -891,21 +892,46 @@ class OpenOrdersReporting:
         allocated_orders = {}
         unallocated_mask = pd.Series([True] * len(df), index=df.index)
         
-        # Check if ProductNum column exists
-        if not self._column_exists(df, 'ProductNum'):
-            logging.warning(f"[OpenOrdersReporting] ProductNum column not found, skipping product-based separation")
+        # Define columns to search for customer codes
+        search_columns = []
+        for col in ['Order', 'ProductNum', 'ShipAddress', 'OurRef']:
+            if self._column_exists(df, col):
+                search_columns.append((col, self._get_actual_column_name(col)))
+        
+        if not search_columns:
+            logging.warning(f"[OpenOrdersReporting] No searchable columns found (Order, ProductNum, ShipAddress, OurRef), skipping product-based separation")
             return {}, df.copy()
-            
-        product_col = self._get_actual_column_name('ProductNum')
+        
+        logging.info(f"[OpenOrdersReporting] Searching in columns: {[col[0] for col in search_columns]}")
         
         # For each customer that can have separate files
         for customer_code, rule in self.processing_rules.items():
             # Only consider customers with separate files enabled
             if not rule.get('create_separate_file', False):
                 continue
+            
+            # Normalize customer code for comparison
+            normalized_customer_code = self._normalize_string(customer_code)
+            customer_mask = pd.Series([False] * len(df), index=df.index)
+            
+            # Check each search column for exact matches
+            for col_name, actual_col_name in search_columns:
+                # Normalize column values and check for exact matches
+                normalized_col = df[actual_col_name].apply(lambda x: self._normalize_string(x) if pd.notna(x) else "")
                 
-            # Extract orders where ProductNum starts with customer code
-            customer_mask = df[product_col].astype(str).str.startswith(customer_code, na=False)
+                # Exact match
+                exact_match = normalized_col == normalized_customer_code
+                
+                # Prefix match for ProductNum (e.g., GENERIC-SAMPLE-123)
+                if col_name == 'ProductNum':
+                    prefix_match = normalized_col.str.startswith(f"{normalized_customer_code}-", na=False)
+                    col_match = exact_match | prefix_match
+                else:
+                    col_match = exact_match
+                
+                if col_match.any():
+                    customer_mask |= col_match
+                    logging.info(f"[OpenOrdersReporting] Found {col_match.sum()} matches for '{customer_code}' in {col_name}")
             
             if customer_mask.any():
                 customer_orders = df[customer_mask & unallocated_mask].copy()
