@@ -44,6 +44,7 @@ Code,CustomerName,CreateSeparateFile,Description/Notes
 CAL,Calvary (Little Company of Mary Health Care),yes,
 WES,WESTFIELD,yes,
 NRMA-PR,NRMA Parks & Resorts,yes,
-NRMA,,yes,
+NRMA,NRMA,yes,
 MTS,Metro Trans Sydney,yes,
 RFDS,RFDS,yes,
+SBU,SYDNEY BUSES,yes,
