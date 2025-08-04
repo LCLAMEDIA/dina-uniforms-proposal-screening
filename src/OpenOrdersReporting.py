@@ -945,16 +945,18 @@ class OpenOrdersReporting:
             if self._column_exists(df, 'OurRef'):
                 fuzzy_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
             
-            # Check fuzzy matching for customer code (requires word boundaries)
+            # Check fuzzy matching for customer code (requires strict word boundaries)
             for col_name, actual_col_name in fuzzy_columns:
                 for idx, value in enumerate(df[actual_col_name]):
                     if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
                         value_upper = value.upper()
                         code_upper = customer_code.upper()
                         
-                        # Code matching: Check if code appears with word boundaries (space, slash, start/end)
+                        # Code matching: Check if code appears as exact word (surrounded by spaces, punctuation, or at start/end)
                         import re
-                        code_pattern = r'\b' + re.escape(code_upper) + r'\b|/' + re.escape(code_upper) + r'[\s/]|[\s/]' + re.escape(code_upper) + r'/'
+                        # More strict pattern: code must be surrounded by word boundaries or specific delimiters
+                        # This prevents "WES" from matching "WEST" by requiring exact word matches
+                        code_pattern = r'(?:^|[\s\-/,.()])' + re.escape(code_upper) + r'(?=[\s\-/,.()]|$)'
                         if re.search(code_pattern, value_upper):
                             fuzzy_matches.iloc[idx] = True
             
