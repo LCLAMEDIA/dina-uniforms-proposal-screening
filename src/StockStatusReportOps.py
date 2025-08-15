@@ -413,9 +413,9 @@ class StockStatusReportOps:
 
                 parsed = australia_tz.localize(parsed)
 
-                if parsed.replace(tzinfo=timezone.utc) == self.australia_now:
+                if parsed == self.australia_now:
                     return col_idx
-                elif parsed.replace(tzinfo=timezone.utc) >= self.australia_now:
+                elif parsed >= self.australia_now:
                     return col_idx - 1
             except (ValueError, TypeError) as e:
                 logging.warning(f"[StockStatusReportOps] Getting index for target date {self.australia_now} in SSR summary warning: {e}")
