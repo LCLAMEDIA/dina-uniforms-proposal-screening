@@ -401,15 +401,21 @@ class StockStatusReportOps:
         return fiscal_year_start, fiscal_year_end
     
     def get_target_ssr_summary_table_column(self, ssr_summary_df: pd.DataFrame) -> int | None:
+
+        australia_tz = pytz.timezone("Australia/Sydney")
+
         row = ssr_summary_df.iloc[1]  # 2nd row (Python index 1)
 
         for col_idx, val in row.items():
             try:
                 # Try parsing the value as a date
                 parsed = parse(str(val), fuzzy=True)
-                if parsed.replace(tzinfo=timezone.utc) == self.australia_now:
+
+                parsed = australia_tz.localize(parsed)
+
+                if parsed == self.australia_now:
                     return col_idx
-                elif parsed.replace(tzinfo=timezone.utc) >= self.australia_now:
+                elif parsed >= self.australia_now:
                     return col_idx - 1
             except (ValueError, TypeError) as e:
                 logging.warning(f"[StockStatusReportOps] Getting index for target date {self.australia_now} in SSR summary warning: {e}")
