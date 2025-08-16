@@ -890,6 +890,7 @@ class OpenOrdersReporting:
             
         logging.info(f"[OpenOrdersReporting] Starting product-based separation for {len(df)} orders")
         
+        import re
         allocated_orders = {}
         unallocated_mask = pd.Series([True] * len(df), index=df.index)
         
@@ -945,37 +946,21 @@ class OpenOrdersReporting:
             if self._column_exists(df, 'OurRef'):
                 fuzzy_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
             
-            # Check fuzzy matching for customer code (requires strict word boundaries)
+            # Check customer code matching using word boundaries
             for col_name, actual_col_name in fuzzy_columns:
                 for idx, value in enumerate(df[actual_col_name]):
                     if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
                         value_upper = value.upper()
                         code_upper = customer_code.upper()
                         
-                        # Code matching: Check if code appears as exact word (surrounded by spaces, punctuation, or at start/end)
-                        import re
-                        # More strict pattern: code must be surrounded by word boundaries or specific delimiters
-                        # This prevents "WES" from matching "WEST" by requiring exact word matches
-                        code_pattern = r'(?:^|[\s\-/,.()])' + re.escape(code_upper) + r'(?=[\s\-/,.()]|$)'
+                        # Simple word boundary matching - prevents false positives
+                        code_pattern = r'\b' + re.escape(code_upper) + r'\b'
                         if re.search(code_pattern, value_upper):
                             fuzzy_matches.iloc[idx] = True
             
-            # Check fuzzy matching for customer name (partial matching allowed)
-            if customer_name and customer_name.strip():
-                for col_name, actual_col_name in fuzzy_columns:
-                    for idx, value in enumerate(df[actual_col_name]):
-                        if unallocated_mask.iloc[idx] and pd.notna(value) and isinstance(value, str):
-                            # CustomerName matching: Use partial ratio for full names
-                            similarity = fuzz.partial_ratio(customer_name.upper(), value.upper())
-                            if similarity >= 90:
-                                fuzzy_matches.iloc[idx] = True
-            
             if fuzzy_matches.any():
                 customer_mask |= fuzzy_matches
-                patterns = [customer_code]
-                if customer_name and customer_name.strip():
-                    patterns.append(customer_name)
-                logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} fuzzy matches for patterns {patterns} in {[col[0] for col in fuzzy_columns]} (Code: word boundaries, Name: ≥90%)")
+                logging.info(f"[OpenOrdersReporting] Found {fuzzy_matches.sum()} word boundary matches for customer code '{customer_code}' in {[col[0] for col in fuzzy_columns]}")
             
             if customer_mask.any():
                 customer_orders = df[customer_mask & unallocated_mask].copy()
