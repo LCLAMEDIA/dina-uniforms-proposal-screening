@@ -259,7 +259,7 @@ Location: OOR/Processed/{folder_fmt}/"""
                 "filtered_brands": filtered_brands,
                 "split_brands": split_brands,
                 "files": output_files_list,
-                "location": f"Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/"
+                "location": f"KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/"
             }
         }
         

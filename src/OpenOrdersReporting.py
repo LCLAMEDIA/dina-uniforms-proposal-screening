@@ -72,8 +72,8 @@ class OpenOrdersReporting:
 
         # Configure folder paths based on environment variables
         self.oor_input_prefix = os.environ.get('OOR_INPUT_PREFIX', 'OOR')
-        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
-        self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
+        self.oor_input_path = os.environ.get('OOR_INPUT_PATH', '/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Upload')
+        self.oor_output_path = os.environ.get('OOR_OUTPUT_PATH', '/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed')
 
         # Log all configuration values in one place
         logging.info("[OpenOrdersReporting] Loaded configuration values:")

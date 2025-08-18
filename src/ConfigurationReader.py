@@ -10,7 +10,7 @@ class ConfigurationReader:
         """Initialize the configuration reader."""
         self.sharepoint_ops = sharepoint_ops
         self.config_filename = "OOR_CONFIG.xlsx"
-        self.config_path = "/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)"
+        self.config_path = "/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)"
         
         # Initialize empty configurations
         self.official_brands = []
