@@ -14,8 +14,8 @@ from datetime import datetime
 
 # Set up environment variables if not already set
 os.environ.setdefault('OOR_INPUT_PREFIX', 'OOR')
-os.environ.setdefault('OOR_INPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Upload')
-os.environ.setdefault('OOR_OUTPUT_PATH', '/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/Processed')
+os.environ.setdefault('OOR_INPUT_PATH', '/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Upload')
+os.environ.setdefault('OOR_OUTPUT_PATH', '/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed')
 
 # Import the OpenOrdersReporting class
 from OpenOrdersReporting import OpenOrdersReporting
@@ -24,7 +24,7 @@ from AzureOperations import AzureOperations
 from SharePointOperations import SharePointOperations
 
 # Define the OOR_CONFIG path
-OOR_CONFIG_PATH = '/Shared Documents/Operations & Knowledge Base/1. Automations/OPEN ORDER REPORTING (OOR)/OOR_CONFIG.xlsx'
+OOR_CONFIG_PATH = '/Shared Documents/KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/OOR_CONFIG.xlsx'
 
 def setup_logging():
     """Configure logging with a more detailed format for debugging."""
