@@ -1021,8 +1021,8 @@ class OpenOrdersReporting:
         check_columns = []
         if self._column_exists(df, 'ShipAddress'):
             check_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
-        if self._column_exists(df, 'ProductNum'):
-            check_columns.append(('ProductNum', self._get_actual_column_name('ProductNum')))
+        if self._column_exists(df, 'OurRef'):
+            check_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
         if self._column_exists(df, 'itemNote'):
             check_columns.append(('itemNote', self._get_actual_column_name('itemNote')))
         
@@ -1035,7 +1035,9 @@ class OpenOrdersReporting:
                 
             patterns = []
             # Add the customer code itself as a pattern
+            patterns.append(customer_code)
             patterns.append(f"{customer_code}-")
+            patterns.append(f"{customer_code} -")
             
             # Add customer name as pattern (if different from code)
             customer_name = rule.get('customer_name', '')
@@ -1072,7 +1074,7 @@ class OpenOrdersReporting:
                     
                 for col_name, actual_col_name in check_columns:
 
-                    if idx == 0 and (col_name != "ProductNum" or col_name != "itemNote"):
+                    if idx <= 2 and col_name not in ["OurRef", "itemNote"]:
                         continue
                     
                     pattern_match = df[actual_col_name].astype(str).str.contains(pattern, case=False, na=False)
