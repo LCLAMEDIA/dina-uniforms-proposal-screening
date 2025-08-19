@@ -913,7 +913,7 @@ class OpenOrdersReporting:
         
         # Define columns to search for customer codes
         search_columns = []
-        for col in ['Order', 'ProductNum', 'ShipAddress', 'OurRef']:
+        for col in ['Order', 'ProductNum', 'itemNote', 'OurRef']:
             if self._column_exists(df, col):
                 search_columns.append((col, self._get_actual_column_name(col)))
         
@@ -958,8 +958,8 @@ class OpenOrdersReporting:
             
             # Define columns to check for fuzzy matching
             fuzzy_columns = []
-            if self._column_exists(df, 'ShipAddress'):
-                fuzzy_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
+            if self._column_exists(df, 'itemNote'):
+                fuzzy_columns.append(('itemNote', self._get_actual_column_name('itemNote')))
             if self._column_exists(df, 'OurRef'):
                 fuzzy_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
             
