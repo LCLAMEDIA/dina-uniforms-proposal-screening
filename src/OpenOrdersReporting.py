@@ -517,6 +517,15 @@ class OpenOrdersReporting:
                 stats['filtered_brand_rows'] = 0
                 logging.info("[OpenOrdersReporting] No brand filtering needed - no official brands or ProductNum column missing")
             
+            # 2.5. NEGATIVE ORDER QTY - Filter out rows where QtyOrdered is less than 0
+            if self._column_exists(main_df, 'QtyOrdered'):
+                negative_qty_df = main_df[main_df["QtyOrdered"] < 0]
+
+                rows_to_remove = negative_qty_df.index.tolist()
+
+                main_df = main_df.drop(index=rows_to_remove).reset_index(drop=True)
+
+
             # 3. THIRD - Add standard columns to the main dataframe
             main_df = self._add_checking_customer_columns(main_df)
             
@@ -770,7 +779,15 @@ class OpenOrdersReporting:
         # --- Customer Name Population ---
         # df_name is now the target customer name for specific files (e.g. "CALVARY") or "OTHERS"
         if df_name != "OTHERS" and df_name in self.product_num_mapping.values(): # If df_name is a mapped customer name
-             df_to_process['CUSTOMER'] = df_name
+            df_to_process['CUSTOMER'] = df_name
+
+            # Fetch Orders that start with NRMPR- 
+            isNRMPR = df_to_process["Order"].str.startswith("NRMPR-", na=False)
+
+            # Rename customer if orders start with NRMPR-
+            df_to_process.loc[isNRMPR, "CUSTOMER"] = "NRMPR"
+
+            
         elif df_name == "FORMER CUSTOMERS": # This case might be redundant if official_brands are filtered out earlier
             if self._column_exists(df_to_process, 'ProductNum'):
                 for index, row in df_to_process.iterrows():
@@ -1004,8 +1021,10 @@ class OpenOrdersReporting:
         check_columns = []
         if self._column_exists(df, 'ShipAddress'):
             check_columns.append(('ShipAddress', self._get_actual_column_name('ShipAddress')))
-        if self._column_exists(df, 'OurRef'):
-            check_columns.append(('OurRef', self._get_actual_column_name('OurRef')))
+        if self._column_exists(df, 'ProductNum'):
+            check_columns.append(('ProductNum', self._get_actual_column_name('ProductNum')))
+        if self._column_exists(df, 'itemNote'):
+            check_columns.append(('itemNote', self._get_actual_column_name('itemNote')))
         
         # Build patterns from configuration (customer codes and names)
         allocation_patterns = {}
@@ -1016,7 +1035,7 @@ class OpenOrdersReporting:
                 
             patterns = []
             # Add the customer code itself as a pattern
-            patterns.append(customer_code)
+            patterns.append(f"{customer_code}-")
             
             # Add customer name as pattern (if different from code)
             customer_name = rule.get('customer_name', '')
@@ -1027,11 +1046,16 @@ class OpenOrdersReporting:
                     base_name = customer_name.split('(')[0].strip()
                     if base_name and base_name != customer_code:
                         patterns.append(base_name)
-                if ')' in customer_name:
-                    parts = customer_name.replace('(', '').replace(')', '').split()
+                if '-' in customer_name:
+                    parts = customer_name.split('-')
                     for part in parts:
-                        if len(part) > 3:  # Only add meaningful words
+                        if part and len(part) > 3 and part != customer_code:  # Only add meaningful words
                             patterns.append(part)
+                # if ')' in customer_name:
+                #     parts = customer_name.replace('(', '').replace(')', '').split()
+                #     for part in parts:
+                #         if len(part) > 3:  # Only add meaningful words
+                #             patterns.append(part)
             
             allocation_patterns[customer_code] = patterns
         
@@ -1042,11 +1066,15 @@ class OpenOrdersReporting:
             customer_mask = pd.Series([False] * len(df), index=df.index)
             
             # Check each pattern against all relevant columns
-            for pattern in patterns:
+            for idx, pattern in enumerate(patterns):
                 if len(pattern.strip()) < 2:  # Skip very short patterns
                     continue
                     
                 for col_name, actual_col_name in check_columns:
+
+                    if idx == 0 and (col_name != "ProductNum" or col_name != "itemNote"):
+                        continue
+                    
                     pattern_match = df[actual_col_name].astype(str).str.contains(pattern, case=False, na=False)
                     if pattern_match.any():
                         customer_mask |= pattern_match
