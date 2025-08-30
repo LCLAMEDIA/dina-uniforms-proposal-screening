@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, Response
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-import json
+import pytz
 
 from AzureOperations import AzureOperations
 from GoogleDocsOperations import GoogleDocsOperations
@@ -192,42 +192,30 @@ def sharepoint_process_oor():
             error_response = {
                 "success": False,
                 "message": user_message,
-                "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+                "error_time": datetime.now(pytz.timezone('Australia/Sydney')).strftime("%d-%m-%Y %H:%M:%S"),
                 "error_type": error_type
             }
             
             return jsonify(error_response), 400
         
         # Format today's date for display
-        today_fmt = datetime.now().strftime("%d-%m-%Y")
-        folder_fmt = datetime.now().strftime("%d-%m-%y")
+        today_fmt = datetime.now(pytz.timezone('Australia/Sydney')).strftime("%d-%m-%Y")
         
         # Build output files section
         output_files_list = []
         output_files_text = ""
+    
+        filename = result.get("output_file")
+        file_count = result.get("remaining_rows")
+
+        removed_records = result.get("removed_records")
         
-        for file_type, filename in result.get('output_files', {}).items():
-            file_count = 0
-            if file_type in result.get('product_counts', {}):
-                file_count = int(result.get('product_counts', {}).get(file_type, 0))
-            elif file_type == 'main_or_others' and 'remaining_rows' in result:
-                file_count = int(result.get('remaining_rows', 0))
-            
-            output_files_list.append({
-                "file_type": file_type,
-                "filename": filename,
-                "record_count": file_count
-            })
-            output_files_text += f"- {filename}: {file_count} records\n"
-        
-        # Get information about brands
-        filtered_brands = []
-        if hasattr(oor_ops, 'official_brands'):
-            filtered_brands = oor_ops.official_brands
-        
-        split_brands = []
-        if hasattr(oor_ops, 'separate_file_customers'):
-            split_brands = oor_ops.separate_file_customers
+        output_files_list.append({
+            "filename": filename,
+            "record_count": file_count,
+            "removed_records": removed_records,
+        })
+        output_files_text += f"- {filename}: {file_count} records\n"
         
         # Create concise text message
         raw_message = f"""OOR Processing Complete
@@ -235,12 +223,10 @@ File: {file_name}
 Date: {today_fmt}
 Time: {round(float(result.get('duration', 0)), 2)}s
 Records: {int(result.get('total_rows', 0))}
-Duplicates Removed: {int(result.get('duplicate_rows_removed_by_customer_logic', 0))}
-Filtered Brands: {int(result.get('filtered_brand_rows', 0))}
 
 Files:
 {output_files_text}
-Location: OOR/Processed/{folder_fmt}/"""
+Location: KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"""
         
         # Create concise structured response
         response_data = {
@@ -252,14 +238,11 @@ Location: OOR/Processed/{folder_fmt}/"""
                 "processing_time": round(float(result.get('duration', 0)), 2),
                 "stats": {
                     "total": int(result.get('total_rows', 0)),
-                    "duplicates_removed": int(result.get('duplicate_rows_removed_by_customer_logic', 0)),
-                    "filtered_brands_count": int(result.get('filtered_brand_rows', 0)),
+                    "removed_records": int(result.get('removed_records', 0)),
                     "remaining": int(result.get('remaining_rows', 0))
                 },
-                "filtered_brands": filtered_brands,
-                "split_brands": split_brands,
                 "files": output_files_list,
-                "location": f"KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/{folder_fmt}/"
+                "location": f"KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"
             }
         }
         
@@ -276,7 +259,7 @@ Location: OOR/Processed/{folder_fmt}/"""
         error_response = {
             "success": False,
             "message": f"Error: {str(e)}",
-            "error_time": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            "error_time": datetime.now(pytz.timezone('Australia/Sydney')).strftime("%d-%m-%Y %H:%M:%S")
         }
         
         return jsonify(error_response), 500
