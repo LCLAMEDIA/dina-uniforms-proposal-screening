@@ -193,6 +193,9 @@ class OpenOrdersReporting:
 
             remaining_rows = int(main_df.shape[0])
 
+            # Get rows without customer label
+            rows_wo_labels = int(main_df[main_df["CHECKING NOTES"] == ""].shape[0])
+
             # Build file name
             aust_time_now_str = self.australia_now.strftime("%Y%m%d_%H%M%S")
             oor_processed_filename = f"PROCESSED_OOR_{aust_time_now_str}_row_{remaining_rows}.xlsx"
@@ -216,6 +219,7 @@ class OpenOrdersReporting:
             
             stats['remaining_rows'] = remaining_rows
             stats['removed_records'] = removed_records
+            stats['rows_wo_labels'] = rows_wo_labels
 
             logging.info(f"[OpenOrdersReporting] Processing completed in {stats['duration']:.2f} seconds. Stats: {stats}")
             

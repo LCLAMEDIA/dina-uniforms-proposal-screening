@@ -208,6 +208,8 @@ def sharepoint_process_oor():
         filename = result.get("output_file")
         file_count = result.get("remaining_rows")
 
+        rows_wo_labels = result.get("rows_wo_labels", 0) or 0
+
         removed_records = result.get("removed_records")
         
         output_files_list.append({
@@ -219,14 +221,19 @@ def sharepoint_process_oor():
         
         # Create concise text message
         raw_message = f"""OOR Processing Complete
+
 File: {file_name}
+
 Date: {today_fmt}
+
 Time: {round(float(result.get('duration', 0)), 2)}s
+
 Records: {int(result.get('total_rows', 0))}
 
+Records without customer labels: {rows_wo_labels}
+
 Files:
-{output_files_text}
-Location: KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"""
+{output_files_text}"""
         
         # Create concise structured response
         response_data = {
@@ -239,7 +246,8 @@ Location: KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"""
                 "stats": {
                     "total": int(result.get('total_rows', 0)),
                     "removed_records": int(result.get('removed_records', 0)),
-                    "remaining": int(result.get('remaining_rows', 0))
+                    "remaining": int(result.get('remaining_rows', 0)),
+                    "rows_wo_labels": rows_wo_labels
                 },
                 "files": output_files_list,
                 "location": f"KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"
