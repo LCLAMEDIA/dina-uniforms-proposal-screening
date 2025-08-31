@@ -206,7 +206,7 @@ def sharepoint_process_oor():
         output_files_text = ""
     
         filename = result.get("output_file")
-        file_count = result.get("remaining_rows")
+        file_count = result.get("remaining_rows", 0) or 0
 
         rows_wo_labels = result.get("rows_wo_labels", 0) or 0
 
@@ -219,7 +219,7 @@ def sharepoint_process_oor():
             "record_count": file_count,
             "removed_records": removed_records,
         })
-        output_files_text += f"- {filename}: {file_count} records\n"
+        output_files_text += f"- {filename}: {int(file_count):,} records\n"
         
         # Create concise text message
         raw_message = f"""OOR Processing Complete
