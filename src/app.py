@@ -222,15 +222,15 @@ def sharepoint_process_oor():
         # Create concise text message
         raw_message = f"""OOR Processing Complete
 
-File: {file_name}
-
 Date: {today_fmt}
 
-Time: {round(float(result.get('duration', 0)), 2)}s
+Duration: {round(float(result.get('duration', 0)), 2)}s
 
-Records: {int(result.get('total_rows', 0))}
+Upload File: {file_name}
 
-Records without customer labels: {rows_wo_labels}
+Upload File Total Records: {int(result.get('total_rows', 0)):,}
+
+
 
 Files:
 {output_files_text}"""
