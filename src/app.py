@@ -210,6 +210,8 @@ def sharepoint_process_oor():
 
         rows_wo_labels = result.get("rows_wo_labels", 0) or 0
 
+        rows_wo_checking_notes = result.get("rows_wo_checking_notes", 0) or 0
+
         removed_records = result.get("removed_records")
         
         output_files_list.append({
@@ -247,7 +249,8 @@ Files:
                     "total": int(result.get('total_rows', 0)),
                     "removed_records": int(result.get('removed_records', 0)),
                     "remaining": int(result.get('remaining_rows', 0)),
-                    "rows_wo_labels": rows_wo_labels
+                    "rows_wo_labels": rows_wo_labels,
+                    "rows_wo_checking_notes": rows_wo_checking_notes
                 },
                 "files": output_files_list,
                 "location": f"KNOWLEDGE BASE/AUTOMATIONS/OPEN ORDER REPORTING (OOR)/Processed/"

@@ -194,7 +194,10 @@ class OpenOrdersReporting:
             remaining_rows = int(main_df.shape[0])
 
             # Get rows without customer label
-            rows_wo_labels = int(main_df[main_df["CHECKING NOTES"] == ""].shape[0])
+            rows_wo_labels = int(main_df[main_df["CUSTOMER"] == ""].shape[0])
+
+            # Get rows without customer label
+            rows_wo_checking_notes = int(main_df[main_df["CHECKING NOTES"] == ""].shape[0])
 
             # Build file name
             aust_time_now_str = self.australia_now.strftime("%Y%m%d_%H%M%S")
@@ -220,6 +223,7 @@ class OpenOrdersReporting:
             stats['remaining_rows'] = remaining_rows
             stats['removed_records'] = removed_records
             stats['rows_wo_labels'] = rows_wo_labels
+            stats['rows_wo_checking_notes'] = rows_wo_checking_notes
 
             logging.info(f"[OpenOrdersReporting] Processing completed in {stats['duration']:.2f} seconds. Stats: {stats}")
             
