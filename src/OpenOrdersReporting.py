@@ -367,7 +367,7 @@ class OpenOrdersReporting:
                         match = next(filter(lambda pattern: str(pattern).lower() in str(value).lower(), patterns), None)
 
                     if match is not None:
-                        main_df.iloc[idx, main_df.columns.get_loc("CUSTOMER")] = customer_label
+                        main_df.at[idx, "CUSTOMER"] = customer_label
 
                         logging.info(f"[OpenOrdersReporting] Row {row} populated with \"{customer_label}\" matched: {field} ")
 
@@ -409,7 +409,7 @@ class OpenOrdersReporting:
 
         # Map comparison strings to actual operations
         ops = {
-            "less_than": lambda d: d.date() >= cutoff.date(),
+            "less_than": lambda d: d.date() > cutoff.date(),
             "greater_than": lambda d: d.date() < cutoff.date(),
             "less_equal": lambda d: d.date() >= cutoff.date() or d.date() == cutoff.date(),
             "greater_equal": lambda d: d.date() <= cutoff.date() or d.date() == cutoff.date(),
@@ -448,6 +448,8 @@ class OpenOrdersReporting:
     def _populate_checking_notes(self, idx, main_df: pd.DataFrame, task_queue, qid, parsed_date_issued, parsed_qid_date, parsed_our_ref_date, our_ref_string):
         logging.info(f"[OpenOrdersReporting] Populating checking notes to row {idx}")
 
+        customer = main_df.at[idx, "CUSTOMER"]
+
         label = ""
 
         if parsed_date_issued and self.check_business_days(date=parsed_date_issued, n=3, comparison="less_than", today=self.australia_now):
@@ -481,6 +483,9 @@ class OpenOrdersReporting:
             if self.check_business_days(date=parsed_qid_date, n=3, comparison="less_than", today=self.australia_now):
                 label = "SHOULD SHIP THIS WEEK"
 
+            if self.check_business_days(date=parsed_qid_date, n=3, comparison="greater_than", today=self.australia_now):
+                label = "PO RECEIVED PLEASE SHIP"
+
         if not pd.isna(qid) and str(int(qid)).strip() in ["4", "5"] and our_ref_string:
 
             if "direct" in our_ref_string:
@@ -502,8 +507,10 @@ class OpenOrdersReporting:
             if self.check_business_days(date=parsed_qid_date, n=5, comparison="greater_than", today=self.australia_now):
                 label = "DECO OVERDUE"
 
+        if not pd.isna(customer) and "expire" in str(customer).lower():
+            label = "EXPIRED"
             
-        main_df.iloc[idx, main_df.columns.get_loc("CHECKING NOTES")] = label
+        main_df.at[idx, "CHECKING NOTES"] = label
         
         logging.info(f"[OpenOrdersReporting] Row {idx} populated with {label} in checking notes")
 
@@ -521,7 +528,7 @@ class OpenOrdersReporting:
 
         robot_soh_value = self.robot_soh_lookup.get(barcode, "") or ""
 
-        main_df.iloc[idx, main_df.columns.get_loc("ROBOT SOH")] = robot_soh_value
+        main_df.at[idx, "ROBOT SOH"] = robot_soh_value
 
         logging.info(f"[OpenOrdersReporting] Row {idx} populated with robot SOH: {robot_soh_value}")
 
