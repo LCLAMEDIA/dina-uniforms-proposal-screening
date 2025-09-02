@@ -455,7 +455,7 @@ class OpenOrdersReporting:
         if parsed_date_issued and self.check_business_days(date=parsed_date_issued, n=3, comparison="less_than", today=self.australia_now):
             label = "< 3 DAYS"
 
-        if not pd.isna(task_queue) and str("62: CANCLE Q").lower() in str(task_queue).lower():
+        if not pd.isna(task_queue) and str("62: CANCEL").lower() in str(task_queue).lower():
             label = "CANCEL Q"
 
         if not pd.isna(task_queue) and str("Data Entry CHK").lower() in str(task_queue).lower():
