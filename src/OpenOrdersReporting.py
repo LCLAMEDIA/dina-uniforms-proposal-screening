@@ -486,11 +486,9 @@ class OpenOrdersReporting:
             if self.check_business_days(date=parsed_qid_date, n=3, comparison="greater_than", today=self.australia_now):
                 label = "PO RECEIVED PLEASE SHIP"
 
-        if not pd.isna(qid) and str(int(qid)).strip() in ["4", "5"] and our_ref_string:
-
-            if "direct" in our_ref_string:
-                label = "DIRECT PO RECEIVED PLEASE SHIP"
-
+                if our_ref_string and "direct" in our_ref_string:
+                    label = "DIRECT PO RECEIVED PLEASE SHIP"
+                    
         if not pd.isna(qid) and str(int(qid)).strip() == "31" and parsed_qid_date:
 
             if self.check_business_days(date=parsed_qid_date, n=11, comparison="less_than", today=self.australia_now):
