@@ -397,8 +397,8 @@ class OpenOrdersReporting:
         Generic checker.
         
         comparison options:
-        - 'less_than'  -> check_date >= today - n business days
-        - 'greater_than' -> check_date < today - n business days
+        - 'less_than'  -> check_date > today - n business days
+        - 'greater_than' -> check_date <= today - n business days
         - 'less_equal'
         - 'greater_equal'
         """
@@ -410,7 +410,7 @@ class OpenOrdersReporting:
         # Map comparison strings to actual operations
         ops = {
             "less_than": lambda d: d.date() > cutoff.date(),
-            "greater_than": lambda d: d.date() < cutoff.date(),
+            "greater_than": lambda d: d.date() <= cutoff.date(),
             "less_equal": lambda d: d.date() >= cutoff.date() or d.date() == cutoff.date(),
             "greater_equal": lambda d: d.date() <= cutoff.date() or d.date() == cutoff.date(),
             "passed": lambda d: d.date() < today.date(),
