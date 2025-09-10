@@ -375,44 +375,67 @@ class OpenOrdersReporting:
 
 
     @staticmethod
-    def business_days_ago(today: datetime, n: int) -> datetime:
-        """Return the datetime representing `n` business days ago from today."""
-        current = today
-        days_counted = 0
-        while days_counted < n:
-            current -= timedelta(days=1)
-            if current.weekday() < 5:  # 0=Mon .. 6=Sun
+    def add_business_days(start: datetime, n: int) -> datetime:
+        """
+        Add n business days including `start` itself.
+        Example: n=1 always returns start (if it's a weekday).
+        If start is weekend, jump to nearest weekday first.
+        """
+        current = start
+
+        # If weekend, move to closest weekday (forward if n>0, backward if n<0)
+        if current.weekday() >= 5:
+            step = 1 if n > 0 else -1
+            while current.weekday() >= 5:
+                current += timedelta(days=step)
+
+        # If n=1, return today (inclusive rule)
+        if abs(n) == 1:
+            return current
+
+        step = 1 if n > 0 else -1
+        days_counted = 1  # already counted today
+
+        while days_counted < abs(n):
+            current += timedelta(days=step)
+            if current.weekday() < 5:
                 days_counted += 1
+
         return current
 
 
     @staticmethod
     def check_business_days(
-        date: datetime, 
-        n: int, 
-        comparison: str, 
+        date: datetime,
+        n: int,
+        comparison: str,
         today: Optional[datetime] = None
     ) -> bool:
         """
-        Generic checker.
-        
-        comparison options:
-        - 'less_than'  -> check_date > today - n business days
-        - 'greater_than' -> check_date <= today - n business days
-        - 'less_equal'
-        - 'greater_equal'
+        Comparison operations for business-day checks:
+
+        Keys:
+        - "n_days_ago"        -> True if the date is exactly N business days ago (inclusive of today).
+        - "n_days_after"      -> True if the date is exactly N business days after today (inclusive of today).
+        - "within_n_days_ago" -> True if the date falls between N business days ago and today, inclusive.
+        - "less_than"         -> True if the date is on or after the N-days-ago cutoff (i.e. within N days ago).
+        - "greater_than"      -> True if the date is before the N-days-ago cutoff (i.e. more than N days ago).
+        - "passed"            -> True if the date is strictly before today.
+        - "today_or_future"   -> True if the date is today or later.
         """
+
         if today is None:
-            today = datetime.today()
+            today = datetime.now(pytz.timezone('Australia/Sydney'))
 
-        cutoff = OpenOrdersReporting.business_days_ago(today, n)
+        ago_date = OpenOrdersReporting.add_business_days(today, -n)
+        after_date = OpenOrdersReporting.add_business_days(today, n)
 
-        # Map comparison strings to actual operations
-        ops = {
-            "less_than": lambda d: d.date() > cutoff.date(),
-            "greater_than": lambda d: d.date() <= cutoff.date(),
-            "less_equal": lambda d: d.date() >= cutoff.date() or d.date() == cutoff.date(),
-            "greater_equal": lambda d: d.date() <= cutoff.date() or d.date() == cutoff.date(),
+        ops: dict[str, Callable[[datetime], bool]] = {
+            "n_days_ago": lambda d: d.date() == ago_date.date(),
+            "n_days_after": lambda d: d.date() == after_date.date(),
+            "within_n_days_ago": lambda d: ago_date.date() <= d.date() <= today.date(),
+            "less_than": lambda d: d.date() >= ago_date.date(),
+            "greater_than": lambda d: d.date() < ago_date.date(),
             "passed": lambda d: d.date() < today.date(),
             "today_or_future": lambda d: d.date() >= today.date(),
         }
@@ -420,9 +443,7 @@ class OpenOrdersReporting:
         if comparison not in ops:
             raise ValueError(f"Unsupported comparison: {comparison}")
 
-        func: Callable[[datetime], bool] = ops[comparison]
-
-        return func(date)
+        return ops[comparison](date)
 
 
     @staticmethod
