@@ -142,15 +142,15 @@ class ConfigurationReader:
 
             logging.info(f"[ConfigurationReader] Found inventory file: {stock_inventory_df.shape} / Performing clean up")
 
-            clean_stock_inventory_df = stock_inventory_df.dropna(subset=["Barcode", "stockonhandST"])
+            clean_stock_inventory_df = stock_inventory_df.dropna(subset=["Barcode", "QtyInRobotic"])
 
-            clean_stock_inventory_df = clean_stock_inventory_df[clean_stock_inventory_df["stockonhandST"].apply(lambda x: isinstance(x, int) or (isinstance(x, float) and x.is_integer()))]
+            clean_stock_inventory_df = clean_stock_inventory_df[clean_stock_inventory_df["QtyInRobotic"].apply(lambda x: isinstance(x, int) or (isinstance(x, float) and x.is_integer()))]
 
             logging.info(f"[ConfigurationReader] Found inventory cleaned: {clean_stock_inventory_df.shape} / Performing clean up")
 
             robot_soh_lookup_barcode = clean_stock_inventory_df["Barcode"].astype(str).str.strip()
 
-            robot_soh_lookup_qty = clean_stock_inventory_df["stockonhandST"].astype(int)
+            robot_soh_lookup_qty = clean_stock_inventory_df["QtyInRobotic"].astype(int)
             
             logging.info(f"[ConfigurationReader] Converting to look up map object")
 
