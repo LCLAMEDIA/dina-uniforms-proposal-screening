@@ -512,18 +512,18 @@ class OpenOrdersReporting:
                     
         if not pd.isna(qid) and str(int(qid)).strip() == "31" and parsed_qid_date:
 
-            if self.check_business_days(date=parsed_qid_date, n=11, comparison="less_than", today=self.australia_now):
+            if self.check_business_days(date=parsed_qid_date, n=12, comparison="less_than", today=self.australia_now):
                 label = "DECO OK"
 
-            if self.check_business_days(date=parsed_qid_date, n=10, comparison="greater_than", today=self.australia_now):
+            if self.check_business_days(date=parsed_qid_date, n=11, comparison="greater_than", today=self.australia_now):
                 label = "DECO OVERDUE"
 
         if not pd.isna(qid) and str(int(qid)).strip() == "32" and parsed_qid_date:
 
-            if self.check_business_days(date=parsed_qid_date, n=6, comparison="less_than", today=self.australia_now):
+            if self.check_business_days(date=parsed_qid_date, n=7, comparison="less_than", today=self.australia_now):
                 label = "DECO OK"
 
-            if self.check_business_days(date=parsed_qid_date, n=5, comparison="greater_than", today=self.australia_now):
+            if self.check_business_days(date=parsed_qid_date, n=6, comparison="greater_than", today=self.australia_now):
                 label = "DECO OVERDUE"
 
         if not pd.isna(customer) and "expire" in str(customer).lower():
