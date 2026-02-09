@@ -463,9 +463,13 @@ class OpenOrdersReporting:
         if len(year) == 2:
             year = "20" + year
 
-        # Parse with Australian format (day first)
-        logging.info(f"[OpenOrdersReporting] Parsing extracted date: {day}/{month}/{year}")
-        return datetime.strptime(f"{day}/{month}/{year}", "%d/%m/%Y")
+        try:
+            # Parse with Australian format (day first)
+            logging.info(f"[OpenOrdersReporting] Parsing extracted date: {day}/{month}/{year}")
+            return datetime.strptime(f"{day}/{month}/{year}", "%d/%m/%Y")
+        except Exception as e:
+            logging.error(f"[OpenOrdersReporting] Failure to parse date: {day}/{month}/{year}. Error: {e}")
+            return None
     
     def _populate_checking_notes(self, idx, main_df: pd.DataFrame, task_queue, qid, parsed_date_issued, parsed_qid_date, parsed_our_ref_date, our_ref_string):
         logging.info(f"[OpenOrdersReporting] Populating checking notes to row {idx}")
@@ -548,7 +552,7 @@ class OpenOrdersReporting:
 
         robot_soh_value = self.robot_soh_lookup.get(barcode, "") or ""
 
-        main_df.at[idx, "ROBOT SOH"] = robot_soh_value
+        main_df.at[idx, "ROBOT SOH"] = str(robot_soh_value)
 
         logging.info(f"[OpenOrdersReporting] Row {idx} populated with robot SOH: {robot_soh_value}")
 
