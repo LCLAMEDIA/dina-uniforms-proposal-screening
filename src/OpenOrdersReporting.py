@@ -464,6 +464,7 @@ class OpenOrdersReporting:
             year = "20" + year
 
         # Parse with Australian format (day first)
+        logging.info(f"[OpenOrdersReporting] Parsing extracted date: {day}/{month}/{year}")
         return datetime.strptime(f"{day}/{month}/{year}", "%d/%m/%Y")
     
     def _populate_checking_notes(self, idx, main_df: pd.DataFrame, task_queue, qid, parsed_date_issued, parsed_qid_date, parsed_our_ref_date, our_ref_string):
