@@ -552,7 +552,7 @@ class OpenOrdersReporting:
 
         robot_soh_value = self.robot_soh_lookup.get(barcode, "") or ""
 
-        main_df.at[idx, "ROBOT SOH"] = robot_soh_value
+        main_df.at[idx, "ROBOT SOH"] = str(robot_soh_value)
 
         logging.info(f"[OpenOrdersReporting] Row {idx} populated with robot SOH: {robot_soh_value}")
 
