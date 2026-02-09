@@ -463,9 +463,13 @@ class OpenOrdersReporting:
         if len(year) == 2:
             year = "20" + year
 
-        # Parse with Australian format (day first)
-        logging.info(f"[OpenOrdersReporting] Parsing extracted date: {day}/{month}/{year}")
-        return datetime.strptime(f"{day}/{month}/{year}", "%d/%m/%Y")
+        try:
+            # Parse with Australian format (day first)
+            logging.info(f"[OpenOrdersReporting] Parsing extracted date: {day}/{month}/{year}")
+            return datetime.strptime(f"{day}/{month}/{year}", "%d/%m/%Y")
+        except Exception as e:
+            logging.error(f"[OpenOrdersReporting] Failure to parse date: {day}/{month}/{year}. Error: {e}")
+            return None
     
     def _populate_checking_notes(self, idx, main_df: pd.DataFrame, task_queue, qid, parsed_date_issued, parsed_qid_date, parsed_our_ref_date, our_ref_string):
         logging.info(f"[OpenOrdersReporting] Populating checking notes to row {idx}")
